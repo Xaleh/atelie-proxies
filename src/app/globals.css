@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #0b1619;
+  --color-ink-2: #0f1c20;
+  --color-surface: #12242a;
+  --color-surface-2: #1b3238;
+  --color-line: #24393e;
+  --color-edge: #5c7177;
+  --color-gold: #d99f59;
+  --color-gold-soft: #e8b97d;
+  --color-cream: #f2eee9;
+  --color-rust: #8c2703;
+  --color-brown: #4f1d02;
+  --color-muted: #b8b0a4;
+  --color-paper-muted: #4b4038;
+  --color-paper-line: #d9d0c3;
+
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-display: "Barlow Condensed", "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+html {
+  background: var(--color-ink);
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-ink);
+  color: var(--color-cream);
+  font-family: var(--font-sans);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex min-h-11 cursor-pointer items-center justify-center rounded-full px-5 text-[15px] font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-gold {
+    @apply bg-gold text-ink hover:bg-gold-soft;
+  }
+  .btn-ghost {
+    @apply border-[1.5px] border-edge text-cream hover:border-cream;
+  }
+  .btn-dark {
+    @apply bg-ink text-cream hover:bg-ink-2;
+  }
+  .field {
+    @apply min-h-[46px] w-full rounded-[10px] border-[1.5px] border-edge bg-ink px-3.5 text-[15px] text-cream placeholder:text-muted/70;
+  }
+  .field-light {
+    @apply min-h-[46px] w-full rounded-[10px] border-[1.5px] border-paper-muted/60 bg-white px-3.5 text-[15px] text-ink;
+  }
+  .label {
+    @apply mb-1.5 block text-[13px] text-muted;
+  }
+  .panel {
+    @apply rounded-2xl border border-line bg-surface;
+  }
+  .display {
+    @apply font-display font-extrabold uppercase leading-[0.95];
+  }
+  .seal {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider;
+  }
+}

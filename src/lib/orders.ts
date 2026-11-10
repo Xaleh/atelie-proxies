@@ -1,0 +1,236 @@
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { z } from "zod";
+import { loja } from "@/config/loja";
+import { db, schema } from "./db";
+import type { Order, OrderItem, Payment, Status } from "./db/schema";
+import { novoCodigoDePedido, novoToken } from "./ids";
+import { consultarPagamento } from "./mercadopago";
+import { calcularTotais } from "./pricing";
+import { HOSTS_DE_IMAGEM } from "./scryfall";
+
+const { orders, orderItems, payments } = schema;
+
+const texto = (max: number) => z.string().trim().max(max);
+
+// Ids do Scryfall: aceita qualquer UUID bem formado, sem exigir versão.
+const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "id inválido");
+
+const itemSchema = z.object({
+  printId: uuid,
+  oracleId: uuid,
+  name: texto(200).min(1),
+  printedName: texto(200).nullable().optional(),
+  set: texto(10).min(1),
+  collectorNumber: texto(20).min(1),
+  lang: z.enum(["en", "pt"]),
+  image: z
+    .string()
+    .url()
+    .max(400)
+    .refine((u) => {
+      try {
+        const url = new URL(u);
+        return url.protocol === "https:" && HOSTS_DE_IMAGEM.includes(url.hostname);
+      } catch {
+        return false;
+      }
+    }, "imagem fora do Scryfall"),
+  qty: z.number().int().min(1).max(loja.maxCopiasPorCarta),
+});
+
+export const pedidoSchema = z
+  .object({
+    nome: texto(120).min(2, "Informe seu nome"),
+    contato: texto(160).min(5, "Informe um e-mail ou telefone"),
+    entrega: z.enum(["envio", "retirada"]),
+    cep: texto(12).optional().default(""),
+    endereco: texto(300).optional().default(""),
+    observacoes: texto(1000).optional().default(""),
+    /** Campo-isca: gente não preenche, robô costuma preencher. */
+    site: z.string().max(0).optional().default(""),
+    itens: z.array(itemSchema).min(1, "O pedido está vazio").max(300),
+  })
+  .superRefine((p, ctx) => {
+    if (p.entrega === "envio") {
+      if (!/^\d{5}-?\d{3}$/.test(p.cep)) ctx.addIssue({ code: "custom", path: ["cep"], message: "Informe um CEP válido" });
+      if (p.endereco.length < 8) ctx.addIssue({ code: "custom", path: ["endereco"], message: "Informe o endereço completo" });
+    }
+    const total = p.itens.reduce((n, i) => n + i.qty, 0);
+    if (total > loja.maxCartasPorPedido) {
+      ctx.addIssue({ code: "custom", path: ["itens"], message: `O limite é de ${loja.maxCartasPorPedido} cartas por pedido` });
+    }
+  });
+
+export type PedidoInput = z.infer<typeof pedidoSchema>;
+
+/** Cria o pedido. O preço é sempre recalculado aqui, nunca vem do navegador. */
+export async function criarPedido(input: PedidoInput): Promise<Order> {
+  const quantidade = input.itens.reduce((n, i) => n + i.qty, 0);
+  const totais = calcularTotais(quantidade, input.entrega);
+
+  for (let tentativa = 0; tentativa < 5; tentativa++) {
+    const code = novoCodigoDePedido();
+    try {
+      return await db().transaction(async (tx) => {
+        const [order] = await tx
+          .insert(orders)
+          .values({
+            code,
+            token: novoToken(),
+            customerName: input.nome,
+            customerContact: input.contato,
+            delivery: input.entrega,
+            cep: input.entrega === "envio" ? input.cep : null,
+            address: input.entrega === "envio" ? input.endereco : null,
+            notes: input.observacoes || null,
+            quantity: quantidade,
+            unitCents: totais.unitario,
+            subtotalCents: totais.subtotal,
+            shippingCents: totais.frete,
+            totalCents: totais.total,
+          })
+          .returning();
+        await tx.insert(orderItems).values(
+          input.itens.map((i) => ({
+            orderId: order.id,
+            printId: i.printId,
+            oracleId: i.oracleId,
+            name: i.name,
+            printedName: i.printedName ?? null,
+            setCode: i.set,
+            collectorNumber: i.collectorNumber,
+            lang: i.lang,
+            image: i.image,
+            quantity: i.qty,
+          })),
+        );
+        return order;
+      });
+    } catch (err) {
+      // Código repetido (raríssimo): sorteia outro.
+      if (String(err).includes("UNIQUE") && tentativa < 4) continue;
+      throw err;
+    }
+  }
+  throw new Error("Não foi possível gerar um código de pedido");
+}
+
+export type PedidoCompleto = { order: Order; items: OrderItem[]; payments: Payment[] };
+
+async function completar(order: Order | undefined): Promise<PedidoCompleto | null> {
+  if (!order) return null;
+  const [items, pays] = await Promise.all([
+    db().select().from(orderItems).where(eq(orderItems.orderId, order.id)).orderBy(orderItems.id),
+    db().select().from(payments).where(eq(payments.orderId, order.id)).orderBy(payments.id),
+  ]);
+  return { order, items, payments: pays };
+}
+
+export async function pedidoPorToken(token: string): Promise<PedidoCompleto | null> {
+  if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return null;
+  const [order] = await db().select().from(orders).where(eq(orders.token, token)).limit(1);
+  return completar(order);
+}
+
+export async function pedidoPorCodigo(code: string): Promise<PedidoCompleto | null> {
+  if (!/^PX-[0-9A-Z]{4}$/.test(code)) return null;
+  const [order] = await db().select().from(orders).where(eq(orders.code, code)).limit(1);
+  return completar(order);
+}
+
+export type Filtro = "abertos" | "enviados" | "todos";
+
+export async function listarPedidos(filtro: Filtro) {
+  const where =
+    filtro === "abertos"
+      ? inArray(orders.status, ["recebido", "pago", "producao"])
+      : filtro === "enviados"
+        ? eq(orders.status, "enviado")
+        : undefined;
+  const ptCount = sql<number>`(
+    select coalesce(sum(${orderItems.quantity}), 0) from ${orderItems}
+    where ${orderItems.orderId} = ${orders.id} and ${orderItems.lang} = 'pt'
+  )`;
+  return db()
+    .select({ order: orders, emPortugues: ptCount })
+    .from(orders)
+    .where(where)
+    .orderBy(desc(orders.id))
+    .limit(200);
+}
+
+export async function contarNovos(): Promise<number> {
+  const [r] = await db()
+    .select({ n: sql<number>`count(*)` })
+    .from(orders)
+    .where(eq(orders.status, "recebido"));
+  return Number(r?.n ?? 0);
+}
+
+const AGORA = sql`(CURRENT_TIMESTAMP)`;
+
+/** Mudança de status feita pelo painel. */
+export async function mudarStatus(code: string, status: Status, tracking?: string): Promise<void> {
+  const atual = await pedidoPorCodigo(code);
+  if (!atual) throw new Error("Pedido não encontrado");
+
+  if (status === "pago" && atual.order.status === "recebido") {
+    await db().transaction(async (tx) => {
+      await tx
+        .update(orders)
+        .set({ status: "pago", paidAt: AGORA, paymentMethod: atual.order.paymentMethod ?? "pix" })
+        .where(eq(orders.id, atual.order.id));
+      await tx.insert(payments).values({
+        orderId: atual.order.id,
+        provider: "pix",
+        status: "confirmado no painel",
+        amountCents: atual.order.totalCents,
+      });
+    });
+    return;
+  }
+
+  await db()
+    .update(orders)
+    .set({
+      status,
+      ...(status === "enviado" ? { shippedAt: AGORA, tracking: tracking?.trim() || null } : {}),
+    })
+    .where(eq(orders.id, atual.order.id));
+}
+
+export type Conciliacao = "pago" | "ja-registrado" | "nao-aprovado" | "nao-confere" | "desconhecido";
+
+/**
+ * Confere um pagamento do Mercado Pago e, se estiver aprovado no valor certo,
+ * marca o pedido como pago. Pode ser chamada várias vezes para o mesmo
+ * pagamento (o webhook é reenviado): só a primeira altera o pedido.
+ */
+export async function conciliarPagamentoMP(paymentId: string): Promise<Conciliacao> {
+  const pagamento = await consultarPagamento(paymentId);
+  if (!pagamento || !pagamento.externalReference) return "desconhecido";
+
+  const pedido = await pedidoPorCodigo(pagamento.externalReference);
+  if (!pedido) return "desconhecido";
+  if (pagamento.status !== "approved") return "nao-aprovado";
+  if (pagamento.moeda !== "BRL" || pagamento.centavos < pedido.order.totalCents) return "nao-confere";
+
+  const inseridos = await db()
+    .insert(payments)
+    .values({
+      orderId: pedido.order.id,
+      provider: "mercadopago",
+      providerPaymentId: pagamento.id,
+      status: pagamento.status,
+      amountCents: pagamento.centavos,
+    })
+    .onConflictDoNothing()
+    .returning({ id: payments.id });
+  if (inseridos.length === 0) return "ja-registrado";
+
+  await db()
+    .update(orders)
+    .set({ status: "pago", paidAt: AGORA, paymentMethod: "mercadopago" })
+    .where(and(eq(orders.id, pedido.order.id), eq(orders.status, "recebido")));
+  return "pago";
+}
