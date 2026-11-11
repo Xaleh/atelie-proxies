@@ -53,6 +53,12 @@ Outros comandos: `npm test` (testes), `npm run typecheck`, `npm run lint`,
    `https://SEU-SITE/api/webhooks/mercadopago` para o evento **Pagamentos** e
    copie a assinatura secreta para `MERCADOPAGO_WEBHOOK_SECRET`.
 
+Marque como "Contains secret values" só o que é segredo de verdade: os tokens,
+a senha do painel, o segredo da sessão e a assinatura do webhook. O Netlify
+procura o valor de cada variável secreta nos arquivos do site e derruba o build
+se achar. `PIX_RECEBEDOR`, `PIX_CIDADE` e `SITE_URL` são públicos e podem
+coincidir com textos do site, então ficam sem essa marca.
+
 No plano gratuito do Netlify cada deploy de produção gasta créditos, e os
 deploys de pré-visualização (branches e pull requests) não gastam. Vale juntar
 mudanças antes de enviar para a `main`.

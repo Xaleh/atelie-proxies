@@ -11,7 +11,7 @@ describe("gerarPixCopiaECola", () => {
   const codigo = gerarPixCopiaECola({
     chave: "contato@exemplo.com",
     recebedor: "Ateliê São João",
-    cidade: "Belo Horizonte",
+    cidade: "Cidade Exemplo",
     centavos: 7250,
     txid: "PX-7K3D",
   });
@@ -32,7 +32,7 @@ describe("gerarPixCopiaECola", () => {
 
   it("tira acentos e respeita os limites de nome e cidade", () => {
     expect(codigo).toContain("5915Atelie Sao Joao");
-    expect(codigo).toContain("6014Belo Horizonte");
+    expect(codigo).toContain("6014Cidade Exemplo");
     const longo = gerarPixCopiaECola({
       chave: "x",
       recebedor: "Um Nome de Recebedor Muito Comprido Mesmo",
