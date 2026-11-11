@@ -32,7 +32,7 @@ const base = {
   contato: "marina@exemplo.com",
   entrega: "envio" as const,
   cep: "30000-000",
-  endereco: "Rua das Cartas, 100, Belo Horizonte, MG",
+  endereco: "Rua das Cartas, 100, Cidade Exemplo, EX",
   observacoes: "",
   site: "",
 };
