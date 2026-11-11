@@ -1,3 +1,4 @@
+import type { DetalheDeImpressao, FaceDeImpressao } from "./print/lote";
 import type { CardPrint, CatalogEntry } from "./types";
 
 /**
@@ -25,11 +26,12 @@ type ScryfallCard = {
   set: string;
   set_name: string;
   collector_number: string;
-  image_uris?: { normal?: string };
+  image_uris?: { normal?: string; png?: string };
   card_faces?: Array<{
+    name?: string;
     oracle_id?: string;
     printed_name?: string;
-    image_uris?: { normal?: string };
+    image_uris?: { normal?: string; png?: string };
   }>;
 };
 
@@ -75,11 +77,13 @@ async function search(
   return (json.data ?? []).map(toPrint).filter((p): p is CardPrint => p !== null);
 }
 
-/** Até 75 cartas por chamada, por nome ou por oracle_id. */
-async function collection(
-  identifiers: Array<{ name: string } | { oracle_id: string }>,
-): Promise<{ found: CardPrint[]; notFound: string[] }> {
-  const found: CardPrint[] = [];
+type Identificador = { name: string } | { oracle_id: string } | { id: string };
+
+/** Até 75 cartas por chamada do Scryfall; devolve os objetos como vieram. */
+async function collectionBruta(
+  identifiers: Identificador[],
+): Promise<{ cards: ScryfallCard[]; notFound: string[] }> {
+  const cards: ScryfallCard[] = [];
   const notFound: string[] = [];
   for (let i = 0; i < identifiers.length; i += 75) {
     if (i > 0) await pausa(100);
@@ -91,13 +95,40 @@ async function collection(
     });
     if (!res.ok) throw new Error(`Scryfall respondeu ${res.status}`);
     const json = (await res.json()) as ScryfallList;
-    for (const c of json.data ?? []) {
-      const p = toPrint(c);
-      if (p) found.push(p);
-    }
+    cards.push(...(json.data ?? []));
     for (const nf of json.not_found ?? []) if (nf.name) notFound.push(nf.name);
   }
-  return { found, notFound };
+  return { cards, notFound };
+}
+
+/** Por nome ou por oracle_id, já reduzido ao que a loja usa. */
+async function collection(
+  identifiers: Identificador[],
+): Promise<{ found: CardPrint[]; notFound: string[] }> {
+  const { cards, notFound } = await collectionBruta(identifiers);
+  return { found: cards.map(toPrint).filter((p): p is CardPrint => p !== null), notFound };
+}
+
+/**
+ * Detalhes de impressões pelo id, para a produção: todas as faces, com a
+ * imagem de tela e o PNG de impressão de cada uma.
+ */
+export async function detalhesDasImpressoes(ids: string[]): Promise<DetalheDeImpressao[]> {
+  const unicos = [...new Set(ids)];
+  const { cards } = await collectionBruta(unicos.map((id) => ({ id })));
+  return cards.map((c) => {
+    const faces: FaceDeImpressao[] = [];
+    if (c.image_uris?.normal && c.image_uris.png) {
+      faces.push({ nome: c.printed_name ?? c.name, normal: c.image_uris.normal, png: c.image_uris.png });
+    } else {
+      for (const f of c.card_faces ?? []) {
+        if (f.image_uris?.normal && f.image_uris.png) {
+          faces.push({ nome: f.printed_name ?? f.name ?? c.name, normal: f.image_uris.normal, png: f.image_uris.png });
+        }
+      }
+    }
+    return { id: c.id, nome: c.name, lang: c.lang, set: c.set, collectorNumber: c.collector_number, faces };
+  });
 }
 
 /** Para cada carta, a impressão em português mais recente, se existir. */
