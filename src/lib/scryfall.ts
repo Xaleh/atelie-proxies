@@ -1,4 +1,5 @@
 import type { DetalheDeImpressao, FaceDeImpressao } from "./print/lote";
+import { chaveDoNome, type MetaDeImpressao, type Traducao } from "./traducao/tipos";
 import type { CardPrint, CatalogEntry } from "./types";
 
 /**
@@ -17,25 +18,59 @@ const HEADERS = {
   Accept: "application/json",
 };
 
-type ScryfallCard = {
-  id: string;
+type ScryfallFace = {
+  name?: string;
   oracle_id?: string;
-  name: string;
   printed_name?: string;
+  printed_type_line?: string;
+  printed_text?: string;
+  type_line?: string;
+  oracle_text?: string;
+  flavor_text?: string;
+  mana_cost?: string;
+  power?: string;
+  image_uris?: { normal?: string; png?: string };
+};
+
+type ScryfallCard = ScryfallFace & {
+  id: string;
+  name: string;
   lang: string;
   set: string;
   set_name: string;
   collector_number: string;
-  image_uris?: { normal?: string; png?: string };
-  card_faces?: Array<{
-    name?: string;
-    oracle_id?: string;
-    printed_name?: string;
-    image_uris?: { normal?: string; png?: string };
-  }>;
+  frame?: string;
+  layout?: string;
+  border_color?: string;
+  full_art?: boolean;
+  card_faces?: ScryfallFace[];
 };
 
 type ScryfallList = { data?: ScryfallCard[]; not_found?: Array<{ name?: string }> };
+
+/** As faces de uma carta: as de card_faces ou, sem elas, a própria carta. */
+function facesDaCarta(card: ScryfallCard): ScryfallFace[] {
+  return card.card_faces?.length ? card.card_faces : [card];
+}
+
+/** Dados da impressão em inglês que o renderizador da tradução usa. */
+function metaDaImpressao(card: ScryfallCard): MetaDeImpressao {
+  return {
+    frame: card.frame ?? "",
+    layout: card.layout ?? "",
+    borda: card.border_color ?? "",
+    fullArt: Boolean(card.full_art),
+    tipo: card.type_line ?? "",
+    faces: facesDaCarta(card).map((f) => ({
+      nome: f.name ?? card.name,
+      tipo: f.type_line ?? card.type_line ?? "",
+      texto: f.oracle_text ?? "",
+      sabor: Boolean(f.flavor_text),
+      mana: f.mana_cost ?? "",
+      temPT: f.power != null,
+    })),
+  };
+}
 
 function toPrint(card: ScryfallCard): CardPrint | null {
   const face = card.card_faces?.[0];
@@ -52,6 +87,7 @@ function toPrint(card: ScryfallCard): CardPrint | null {
     setName: card.set_name,
     collectorNumber: card.collector_number,
     image,
+    meta: metaDaImpressao(card),
   };
 }
 
@@ -59,11 +95,14 @@ function pausa(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+type OpcoesDeBusca = { unique?: "cards" | "prints"; order?: string; dir?: "asc" | "desc" };
+
 /** Busca na sintaxe do Scryfall. "Nenhum resultado" (404) vira lista vazia. */
-async function search(
-  q: string,
-  opts: { unique?: "cards" | "prints"; order?: string; dir?: "asc" | "desc" } = {},
-): Promise<CardPrint[]> {
+async function search(q: string, opts: OpcoesDeBusca = {}): Promise<CardPrint[]> {
+  return (await searchBruta(q, opts)).map(toPrint).filter((p): p is CardPrint => p !== null);
+}
+
+async function searchBruta(q: string, opts: OpcoesDeBusca = {}): Promise<ScryfallCard[]> {
   const params = new URLSearchParams({ q, unique: opts.unique ?? "cards", order: opts.order ?? "name" });
   if (opts.dir) params.set("dir", opts.dir);
   const res = await fetch(`${API}/cards/search?${params}`, {
@@ -74,7 +113,7 @@ async function search(
   if (res.status === 404 || res.status === 400) return [];
   if (!res.ok) throw new Error(`Scryfall respondeu ${res.status}`);
   const json = (await res.json()) as ScryfallList;
-  return (json.data ?? []).map(toPrint).filter((p): p is CardPrint => p !== null);
+  return json.data ?? [];
 }
 
 type Identificador = { name: string } | { oracle_id: string } | { id: string };
@@ -127,8 +166,48 @@ export async function detalhesDasImpressoes(ids: string[]): Promise<DetalheDeImp
         }
       }
     }
-    return { id: c.id, nome: c.name, lang: c.lang, set: c.set, collectorNumber: c.collector_number, faces };
+    return {
+      id: c.id,
+      oracleId: c.oracle_id ?? c.card_faces?.[0]?.oracle_id,
+      nome: c.name,
+      lang: c.lang,
+      set: c.set,
+      collectorNumber: c.collector_number,
+      faces,
+      meta: metaDaImpressao(c),
+    };
   });
+}
+
+/**
+ * Textos das impressões oficiais em português, por face, chaveados pelo nome
+ * da face em inglês. Usa a impressão em português mais recente de cada carta.
+ */
+export async function textosOficiaisEmPortugues(oracleIds: string[]): Promise<Map<string, Omit<Traducao, "fonte">>> {
+  const textos = new Map<string, Omit<Traducao, "fonte">>();
+  const vistos = new Set<string>();
+  const unicos = [...new Set(oracleIds)];
+  for (let i = 0; i < unicos.length; i += 20) {
+    if (i > 0) await pausa(100);
+    const grupo = unicos.slice(i, i + 20).map((id) => `oracleid:${id}`).join(" or ");
+    const cartas = await searchBruta(`lang:pt (${grupo})`, { unique: "cards", order: "released", dir: "desc" });
+    for (const c of cartas) {
+      const oracle = c.oracle_id ?? c.card_faces?.[0]?.oracle_id;
+      if (!oracle || vistos.has(oracle)) continue;
+      vistos.add(oracle);
+      for (const f of facesDaCarta(c)) {
+        const nomeEn = f.name ?? c.name;
+        if (!f.printed_name || !nomeEn) continue;
+        textos.set(chaveDoNome(nomeEn), {
+          nome: f.printed_name,
+          tipo: f.printed_type_line ?? "",
+          texto: f.printed_text ?? "",
+          sabor: "",
+        });
+      }
+    }
+  }
+  return textos;
 }
 
 /** Para cada carta, a impressão em português mais recente, se existir. */

@@ -13,6 +13,17 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             <span className="font-display text-[22px] font-extrabold uppercase leading-none tracking-wide">{loja.nome}</span>
             <span className="rounded-md bg-rust px-2 py-0.5 text-[11px] font-bold uppercase tracking-widest text-cream">Painel</span>
           </Link>
+          <nav aria-label="Painel" className="flex flex-wrap items-center gap-x-6 text-sm font-semibold">
+            <Link href="/admin" className="py-3 hover:text-gold-soft">
+              Pedidos
+            </Link>
+            <Link href="/admin/producao" className="py-3 hover:text-gold-soft">
+              Produção
+            </Link>
+            <Link href="/admin/traducoes" className="py-3 hover:text-gold-soft">
+              Traduções
+            </Link>
+          </nav>
           <div className="flex items-center gap-4 text-sm text-muted">
             <Link href="/" className="py-3 text-cream hover:text-gold-soft">
               Ver a loja

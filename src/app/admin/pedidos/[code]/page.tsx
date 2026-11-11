@@ -67,7 +67,7 @@ export default async function PedidoAdminPage({ params }: { params: Promise<{ co
                   {item.quantity}× {item.printedName ?? item.name}
                 </span>
                 <span className="truncate text-xs text-muted">
-                  {item.lang === "pt" ? `PT oficial · ${item.name}` : "EN"} · {item.setCode.toUpperCase()} {item.collectorNumber}
+                  {item.translated ? `PT traduzida · ${item.name}` : item.lang === "pt" ? `PT oficial · ${item.name}` : "EN"} · {item.setCode.toUpperCase()} {item.collectorNumber}
                 </span>
               </li>
             ))}

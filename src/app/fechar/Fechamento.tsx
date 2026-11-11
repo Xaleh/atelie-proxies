@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useCart } from "@/lib/cart";
 import { brl } from "@/lib/format";
 import { calcularTotais, type Entrega } from "@/lib/pricing";
-import { impressaoEscolhida } from "@/lib/types";
+import { useSituacoes } from "@/lib/traducao/carrinho";
 
 type Erros = Partial<Record<"nome" | "contato" | "cep" | "endereco" | "itens" | "pedido", string>>;
 
@@ -21,7 +21,9 @@ function Erro({ id, texto }: { id: string; texto?: string }) {
 
 export function Fechamento() {
   const router = useRouter();
-  const { itens, pronto, quantidade, emPortugues, limpar } = useCart();
+  const { itens, pronto, quantidade, limpar } = useCart();
+  const { situacao, emPortugues } = useSituacoes(itens);
+  const verificando = itens.some((i) => i.lang === "pt" && situacao(i).carregando);
   const [entrega, setEntrega] = useState<Entrega>("envio");
   const [enviando, setEnviando] = useState(false);
   const [erros, setErros] = useState<Erros>({});
@@ -47,15 +49,17 @@ export function Fechamento() {
           observacoes: form.get("observacoes") ?? "",
           site: form.get("site") ?? "",
           itens: itens.map((item) => {
-            const p = impressaoEscolhida(item);
+            const { print: p, modo, tr } = situacao(item);
+            const traduzida = modo === "traduzida";
             return {
               printId: p.id,
               oracleId: item.oracleId,
               name: item.name,
-              printedName: p.printedName,
+              printedName: traduzida ? (tr?.nome ?? null) : p.printedName,
               set: p.set,
               collectorNumber: p.collectorNumber,
-              lang: p.lang === "pt" ? "pt" : "en",
+              lang: modo === "oficial" || traduzida ? "pt" : "en",
+              traduzida,
               image: p.image,
               qty: item.qty,
             };
@@ -185,7 +189,7 @@ export function Fechamento() {
             <dd>{brl(totais.total)}</dd>
           </div>
         </dl>
-        <button type="submit" className="btn btn-dark min-h-14 text-[17px]" disabled={enviando || !pronto}>
+        <button type="submit" className="btn btn-dark min-h-14 text-[17px]" disabled={enviando || !pronto || verificando}>
           {enviando ? "Registrando…" : "Confirmar pedido"}
         </button>
         <div role="alert" className="min-h-5 text-sm font-semibold text-rust">

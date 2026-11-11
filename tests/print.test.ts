@@ -92,11 +92,11 @@ describe("lote de produção", () => {
     {
       code: "PX-AAAA",
       itens: [
-        { printId: "simples", nome: "Sol Ring", nomeImpresso: "Anel Solar", lang: "pt", image: normal("simples"), quantidade: 2 },
-        { printId: "dupla", nome: "Delver of Secrets // Insectile Aberration", nomeImpresso: null, lang: "en", image: normal("dupla"), quantidade: 1 },
+        { printId: "simples", oracleId: "o1", traduzida: false, nome: "Sol Ring", nomeImpresso: "Anel Solar", lang: "pt", image: normal("simples"), quantidade: 2 },
+        { printId: "dupla", oracleId: "o2", traduzida: true, nome: "Delver of Secrets // Insectile Aberration", nomeImpresso: null, lang: "en", image: normal("dupla"), quantidade: 1 },
       ],
     },
-    { code: "PX-BBBB", itens: [{ printId: "sem-detalhe", nome: "Counterspell", nomeImpresso: null, lang: "en", image: normal("sem-detalhe"), quantidade: 1 }] },
+    { code: "PX-BBBB", itens: [{ printId: "sem-detalhe", oracleId: "o3", traduzida: false, nome: "Counterspell", nomeImpresso: null, lang: "en", image: normal("sem-detalhe"), quantidade: 1 }] },
   ];
   const detalhes = new Map<string, DetalheDeImpressao>([
     ["simples", { id: "simples", nome: "Sol Ring", lang: "pt", set: "c21", collectorNumber: "263", faces: [{ nome: "Anel Solar", normal: normal("simples"), png: png("simples") }] }],

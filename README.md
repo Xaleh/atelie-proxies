@@ -20,11 +20,23 @@ painel em `/admin`.
   vagas com cartas avulsas, e baixar o PDF de impressão e o gabarito de corte
   em DXF. A geometria e as marcas de registro são as mesmas do site de
   produção anterior, então o gabarito da Silhouette Portrait 4 continua valendo.
+- **Texto em português sobre a arte em inglês:** quando a cliente escolhe PT
+  numa arte que só existe em inglês, o site escreve nome, tipo e texto em
+  português por cima da arte (selo "PT traduzida"), com prévia na loja e no PDF.
+  O texto vem, nesta ordem, da revisão feita no painel, do MTG Arena e da carta
+  impressa em português. As fontes são livres (Crimson Pro e Inter).
+- **Traduções no painel:** em `/admin/traducoes`, importar o
+  `traducoes-arena.json` do agente do Arena (a importação substitui a anterior)
+  e revisar o texto de qualquer carta.
+- **Moldes:** artes com a moldura padrão (2015) recebem o texto sozinhas. Para
+  as outras (sem borda, vitrine, arte estendida), em `/admin/moldes/<id>` o
+  Augusto marca onde ficam nome, tipo e texto, ou desliga o português naquela
+  arte. Na produção, o botão "Molde" de cada carta abre essa tela.
 
 ## O que ainda não entrou
 
-- Texto traduzido sobre a carta em inglês. Hoje o português vale só para cartas
-  com impressão oficial em PT; as outras aparecem como "PT indisponível".
+- Planeswalkers, sagas, batalhas e classes só recebem português com molde
+  manual; o texto delas não cabe no molde automático.
 - Envio de arte própria, fichas (tokens), One Piece e Pokémon.
 - Catálogo local de cartas: a busca usa a API do Scryfall, com cache de 24 h.
 
@@ -80,6 +92,7 @@ Ficam em `src/config/loja.ts`. Os valores atuais são provisórios.
 | `src/app/api/webhooks/mercadopago` | Aviso de pagamento do Mercado Pago |
 | `src/app/admin` | Painel do ateliê |
 | `src/lib` | Regras: preço, Pix, Mercado Pago, Scryfall, pedidos, sessão |
+| `src/lib/traducao` | Traduções: ordem das fontes, moldes e o desenho do texto sobre a arte |
 | `src/lib/print` | Folha de impressão: geometria, lote, PDF e gabarito DXF |
 | `src/lib/db` | Tabelas (Drizzle ORM) e conexão |
 | `drizzle` | Migrações do banco |
