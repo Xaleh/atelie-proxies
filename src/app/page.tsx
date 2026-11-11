@@ -1,20 +1,44 @@
 import Link from "next/link";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
+import { COMPARACAO_IDIOMA, FOLHA_EXEMPLO, type CartaVitrine } from "@/lib/vitrine";
 
-function MiniCarta({ nome, cor, selo }: { nome: string; cor: string; selo: React.ReactNode }) {
+function MiniCarta({ carta, selo }: { carta: CartaVitrine; selo: React.ReactNode }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-2.5">
-      <div className="flex aspect-[63/88] flex-col gap-1.5 rounded-[10px] bg-cream p-2 text-ink">
-        <div className="truncate text-xs font-bold">{nome}</div>
-        <div className="flex-1 rounded" style={{ background: cor }} />
-        <div className="flex flex-col gap-1 rounded bg-[#e6dfd4] p-1.5">
-          <div className="h-1 rounded bg-[#8e8878]" />
-          <div className="h-1 w-2/3 rounded bg-[#8e8878]" />
-        </div>
-      </div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={carta.imagem}
+        alt={`Carta ${carta.nome}`}
+        title={carta.impressao}
+        width={488}
+        height={680}
+        className="aspect-[63/88] w-full rounded-[4.5%/3.2%] bg-surface object-cover shadow-[0_10px_24px_rgba(0,0,0,0.45)]"
+      />
       <div className="self-start">{selo}</div>
     </div>
+  );
+}
+
+function CartaComparada({ carta, idioma }: { carta: CartaVitrine; idioma: "EN" | "PT" }) {
+  const pt = idioma === "PT";
+  return (
+    <figure className="flex min-w-0 max-w-[240px] flex-1 flex-col gap-2.5">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={carta.imagem}
+        alt={`Carta ${carta.nome}, em ${pt ? "português" : "inglês"}`}
+        title={carta.impressao}
+        width={488}
+        height={680}
+        loading="lazy"
+        className={`aspect-[63/88] w-full rounded-[4.5%/3.2%] bg-paper-line object-cover shadow-[0_10px_24px_rgba(11,22,25,0.25)] ${pt ? "outline-2 outline-offset-4 outline-rust" : ""}`}
+      />
+      <figcaption className="flex items-center justify-between gap-2 px-1 text-sm">
+        <span className="truncate font-bold">{carta.nome}</span>
+        <span className={`text-[11px] font-bold ${pt ? "text-rust" : "text-paper-muted"}`}>{idioma}</span>
+      </figcaption>
+    </figure>
   );
 }
 
@@ -56,14 +80,24 @@ export default function Home() {
           </div>
 
           <div className="flex min-w-0 flex-[1_1_420px] justify-center">
-            <div className="panel relative w-full max-w-[460px] px-9 py-11">
+            <div className="panel relative w-full max-w-[520px] px-9 py-11">
               <Marca className="left-3 top-3" />
               <Marca className="right-3 top-3" />
               <Marca className="bottom-3 left-3" />
               <div className="flex gap-4">
-                <MiniCarta nome="Anel Solar" cor="#e0a526" selo={<span className="seal bg-rust text-cream">PT oficial</span>} />
-                <MiniCarta nome="Counterspell" cor="#2f6fdb" selo={<span className="seal border border-muted text-cream">Em inglês</span>} />
-                <MiniCarta nome="Elfos de Llanowar" cor="#2e9b5b" selo={<span className="seal bg-rust text-cream">PT oficial</span>} />
+                {FOLHA_EXEMPLO.map((carta) => (
+                  <MiniCarta
+                    key={carta.nome}
+                    carta={carta}
+                    selo={
+                      carta.idioma === "pt" ? (
+                        <span className="seal bg-rust text-cream">PT oficial</span>
+                      ) : (
+                        <span className="seal border border-muted text-cream">Em inglês</span>
+                      )
+                    }
+                  />
+                ))}
               </div>
               <p className="mt-5 font-mono text-xs text-muted">folha A4 · 8 cartas · 63 × 88 mm</p>
             </div>
@@ -113,29 +147,11 @@ export default function Home() {
               </ul>
             </div>
             <div className="flex min-w-0 flex-[1_1_420px] items-center justify-center gap-5">
-              <div className="flex aspect-[63/88] min-w-0 max-w-[230px] flex-1 flex-col gap-2 rounded-xl border border-paper-line bg-white p-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold">Lightning Bolt</span>
-                  <span className="text-[11px] font-bold text-paper-muted">EN</span>
-                </div>
-                <div className="flex-1 rounded-md bg-[#d9482b]" />
-                <div className="rounded-md bg-[#ede7dd] p-2 text-xs leading-snug">
-                  Lightning Bolt deals 3 damage to any target.
-                </div>
-              </div>
+              <CartaComparada carta={COMPARACAO_IDIOMA.en} idioma="EN" />
               <svg role="img" aria-label="vira" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-8 w-8 shrink-0">
                 <path d="M4 12h16M14 6l6 6-6 6" />
               </svg>
-              <div className="flex aspect-[63/88] min-w-0 max-w-[230px] flex-1 flex-col gap-2 rounded-xl border-2 border-rust bg-white p-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold">Raio</span>
-                  <span className="text-[11px] font-bold text-rust">PT</span>
-                </div>
-                <div className="flex-1 rounded-md bg-[#d9482b]" />
-                <div className="rounded-md bg-[#ede7dd] p-2 text-xs leading-snug">
-                  Raio causa 3 pontos de dano a qualquer alvo.
-                </div>
-              </div>
+              <CartaComparada carta={COMPARACAO_IDIOMA.pt} idioma="PT" />
             </div>
           </div>
         </section>
