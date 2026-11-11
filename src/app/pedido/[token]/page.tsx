@@ -189,7 +189,7 @@ export default async function PedidoPage({
                 <span className="truncate text-sm font-semibold">
                   {item.quantity}× {item.printedName ?? item.name}
                 </span>
-                <span className="text-xs text-muted">{item.lang === "pt" ? "Em português" : "Em inglês"}</span>
+                <span className="text-xs text-muted">{item.translated ? "Texto em português sobre esta arte" : item.lang === "pt" ? "Em português" : "Em inglês"}</span>
               </li>
             ))}
           </ul>

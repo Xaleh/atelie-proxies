@@ -23,6 +23,8 @@ const itemSchema = z.object({
   set: texto(10).min(1),
   collectorNumber: texto(20).min(1),
   lang: z.enum(["en", "pt"]),
+  /** Texto em português escrito sobre a arte em inglês. */
+  traduzida: z.boolean().optional().default(false),
   image: z
     .string()
     .url()
@@ -36,7 +38,7 @@ const itemSchema = z.object({
       }
     }, "imagem fora do Scryfall"),
   qty: z.number().int().min(1).max(loja.maxCopiasPorCarta),
-});
+}).refine((i) => !i.traduzida || i.lang === "pt", "item traduzido precisa estar em português");
 
 export const pedidoSchema = z
   .object({
@@ -100,6 +102,7 @@ export async function criarPedido(input: PedidoInput): Promise<Order> {
             setCode: i.set,
             collectorNumber: i.collectorNumber,
             lang: i.lang,
+            translated: i.traduzida,
             image: i.image,
             quantity: i.qty,
           })),

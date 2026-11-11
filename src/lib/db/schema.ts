@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const STATUS = ["recebido", "pago", "producao", "enviado", "cancelado"] as const;
 export type Status = (typeof STATUS)[number];
@@ -53,6 +53,8 @@ export const orderItems = sqliteTable(
     lang: text("lang").$type<"en" | "pt">().notNull(),
     image: text("image").notNull(),
     quantity: integer("quantity").notNull(),
+    /** Texto em português escrito sobre a arte em inglês (lang = "pt"). */
+    translated: integer("translated", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [index("order_items_order_idx").on(t.orderId)],
 );
@@ -76,6 +78,43 @@ export const payments = sqliteTable(
     uniqueIndex("payments_provider_id_idx").on(t.provider, t.providerPaymentId),
     index("payments_order_idx").on(t.orderId),
   ],
+);
+
+/**
+ * Traduções de cartas, por face, chaveadas pelo nome em inglês em minúsculas
+ * (como o extrator do Arena grava). "manual" vence "arena"; as duas vencem o
+ * texto da carta impressa em português, que vem do Scryfall e não fica aqui.
+ */
+export const translations = sqliteTable(
+  "translations",
+  {
+    nameEn: text("name_en").notNull(),
+    source: text("source").$type<"manual" | "arena">().notNull(),
+    nome: text("nome").notNull(),
+    tipo: text("tipo").notNull(),
+    texto: text("texto").notNull(),
+    sabor: text("sabor").notNull().default(""),
+    updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+  },
+  (t) => [primaryKey({ columns: [t.nameEn, t.source] })],
+);
+
+/** Ambientação em português do Arena, que é de cada edição: "nome|set|número". */
+export const arenaFlavors = sqliteTable("arena_flavors", {
+  key: text("key").primaryKey(),
+  sabor: text("sabor").notNull(),
+});
+
+/** Molde manual (ou bloqueio) de uma face de uma impressão específica. */
+export const printTemplates = sqliteTable(
+  "print_templates",
+  {
+    printId: text("print_id").notNull(),
+    face: integer("face").notNull(),
+    data: text("data").notNull(),
+    updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+  },
+  (t) => [primaryKey({ columns: [t.printId, t.face] })],
 );
 
 export type Order = typeof orders.$inferSelect;

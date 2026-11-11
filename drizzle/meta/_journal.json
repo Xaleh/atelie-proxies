@@ -8,6 +8,13 @@
       "when": 1794340353448,
       "tag": "0000_small_wasp",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794419568427,
+      "tag": "0001_simple_lady_ursula",
+      "breakpoints": true
     }
   ]
 }

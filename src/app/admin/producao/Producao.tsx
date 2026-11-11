@@ -23,12 +23,14 @@ import {
   type PedidoDoLote,
   type Slot,
 } from "@/lib/print/lote";
-import { baixarArquivo, gerarPdf } from "@/lib/print/pdf";
+import { baixarArquivo, gerarPdf, type TraducaoDoSlot } from "@/lib/print/pdf";
+import { useTraducoes } from "@/lib/traducao/cliente";
+import { previaTraduzida } from "@/lib/traducao/render";
 import type { CatalogEntry } from "@/lib/types";
 
 const CHAVE_AJUSTES = "proxy-do-reis:producao:ajustes:v1";
 const chaveDoLote = (pedidos: PedidoDoLote[]) =>
-  "proxy-do-reis:producao:lote:v1:" + (pedidos.map((p) => p.code).sort().join("+") || "avulso");
+  "proxy-do-reis:producao:lote:v2:" + (pedidos.map((p) => p.code).sort().join("+") || "avulso");
 
 function ler<T>(chave: string): T | null {
   try {
@@ -83,7 +85,17 @@ function Numero({
   );
 }
 
-function Folha({ slots, folha, ajustes }: { slots: Slot[]; folha: number; ajustes: Ajustes }) {
+function Folha({
+  slots,
+  folha,
+  ajustes,
+  imagemDe,
+}: {
+  slots: Slot[];
+  folha: number;
+  ajustes: Ajustes;
+  imagemDe: (sl: Slot) => string;
+}) {
   const L = computeLayout(ajustes);
   const b = ajustes.bleed;
   const pagina = slots.slice(folha * POR_FOLHA, (folha + 1) * POR_FOLHA);
@@ -110,7 +122,7 @@ function Folha({ slots, folha, ajustes }: { slots: Slot[]; folha: number; ajuste
               <rect x={p.x - b} y={p.y - b} width={CARD_W + 2 * b} height={CARD_H + 2 * b} fill={sl ? "#222" : "#eef1f3"} />
             )}
             {sl ? (
-              <image href={sl.thumb} x={p.x} y={p.y} width={CARD_W} height={CARD_H} preserveAspectRatio="none" clipPath={`url(#corte-${k})`} />
+              <image href={imagemDe(sl)} x={p.x} y={p.y} width={CARD_W} height={CARD_H} preserveAspectRatio="none" clipPath={`url(#corte-${k})`} />
             ) : (
               <rect x={p.x} y={p.y} width={CARD_W} height={CARD_H} rx={ajustes.radius} fill="#f6f7f8" />
             )}
@@ -244,6 +256,71 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
   const avisos = avisosDoLayout(ajustes);
   const L = computeLayout(ajustes);
 
+  // Tradução das cartas com arte em inglês: as marcadas para sair em português
+  // e as que podem ser marcadas.
+  const emIngles = (sl: Slot) => sl.lang === "en" || sl.traduzida;
+  const facesParaTraduzir = useMemo(() => {
+    const vistas = new Map<string, { oracleId: string; nome: string; set: string; num: string; printId: string; face: number }>();
+    for (const sl of slots ?? []) {
+      if (!(sl.lang === "en" || sl.traduzida) || !sl.oracleId) continue;
+      vistas.set(`${sl.printId}#${sl.face}`, {
+        oracleId: sl.oracleId,
+        nome: sl.nomeEn,
+        set: sl.set,
+        num: sl.num,
+        printId: sl.printId,
+        face: sl.face,
+      });
+    }
+    return [...vistas.values()];
+  }, [slots]);
+  const t = useTraducoes(facesParaTraduzir);
+
+  const traducaoDe = (sl: Slot): TraducaoDoSlot | null => {
+    if (!sl.traduzida) return null;
+    const meta = detalhes.get(sl.printId)?.meta;
+    const tr = t.textoPara(sl.nomeEn, sl.set, sl.num);
+    const molde = t.moldeQueVale(sl.printId, sl.face, meta);
+    return meta && tr && molde ? { meta, face: sl.face, tr, molde } : null;
+  };
+  const situacaoPT = (sl: Slot): string | null => {
+    if (!sl.traduzida) return null;
+    if (t.traducao(sl.nomeEn) === undefined) return "PT · verificando";
+    if (!t.textoPara(sl.nomeEn, sl.set, sl.num)) return "PT · sem tradução";
+    if (!t.moldeQueVale(sl.printId, sl.face, detalhes.get(sl.printId)?.meta)) return "PT · sem molde";
+    return "PT traduzida";
+  };
+  const semTraducao = lista.filter((sl) => sl.traduzida && !traducaoDe(sl)).length;
+
+  const [previas, setPrevias] = useState<Record<string, string>>({});
+  const chaveDaPrevia = (sl: Slot, info: TraducaoDoSlot) => JSON.stringify([sl.thumb, info.face, info.tr, info.molde]);
+  const pedidasDePrevia = lista
+    .map((sl) => {
+      const info = traducaoDe(sl);
+      return info ? { sl, info, chave: chaveDaPrevia(sl, info) } : null;
+    })
+    .filter((x): x is { sl: Slot; info: TraducaoDoSlot; chave: string } => x !== null);
+  const chavesDePrevia = [...new Set(pedidasDePrevia.map((p) => p.chave))].join("\n");
+  useEffect(() => {
+    let vivo = true;
+    const feitas = new Set<string>();
+    for (const { sl, info, chave } of pedidasDePrevia) {
+      if (feitas.has(chave)) continue;
+      feitas.add(chave);
+      previaTraduzida(sl.thumb, info.meta, info.face, info.tr, info.molde)
+        .then((src) => vivo && setPrevias((atual) => (atual[chave] ? atual : { ...atual, [chave]: src })))
+        .catch(() => undefined);
+    }
+    return () => {
+      vivo = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `chavesDePrevia` resume as prévias pedidas
+  }, [chavesDePrevia]);
+  const imagemDe = (sl: Slot) => {
+    const info = traducaoDe(sl);
+    return (info && previas[chaveDaPrevia(sl, info)]) || sl.thumb;
+  };
+
   function mudar<K extends keyof Ajustes>(k: K, v: Ajustes[K]) {
     const novo = { ...ajustes, [k]: v };
     setAjustes(novo);
@@ -260,7 +337,12 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
         uid: `${grupo}-0`,
         grupo,
         printId: print.id,
+        oracleId: print.oracleId,
         face: 0,
+        nomeEn: print.meta?.faces[0]?.nome ?? print.name.split(" // ")[0],
+        set: print.set,
+        num: print.collectorNumber,
+        traduzida: false,
         nome: print.printedName ?? print.name,
         lang,
         thumb: print.image,
@@ -271,13 +353,20 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
   }
 
   async function baixarPdf() {
+    if (
+      semTraducao > 0 &&
+      !window.confirm(
+        `${semTraducao} ${semTraducao === 1 ? "carta marcada" : "cartas marcadas"} para sair em português ainda não ${semTraducao === 1 ? "tem" : "têm"} tradução ou molde e ${semTraducao === 1 ? "vai" : "vão"} sair em inglês. Gerar o PDF mesmo assim?`,
+      )
+    )
+      return;
     setStatus("Preparando o PDF…");
     setProgresso(0);
     try {
       const blob = await gerarPdf(lista, ajustes, (feitas, total, nome) => {
         setProgresso(feitas / total);
         if (nome) setStatus(`Preparando carta ${feitas + 1} de ${total}: ${nome}`);
-      });
+      }, traducaoDe);
       const nome = pedidos.map((p) => p.code).join("-") || "avulso";
       baixarArquivo(blob, `proxies-${nome}-${new Date().toISOString().slice(0, 10)}.pdf`);
       setStatus(`PDF pronto: ${lista.length} cartas em ${folhas} ${folhas > 1 ? "folhas" : "folha"}. Imprima em tamanho real (100%).`);
@@ -325,6 +414,16 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
           {aviso}
         </p>
       )}
+      {semTraducao > 0 && (
+        <p role="status" className="panel border-gold p-4">
+          {semTraducao} {semTraducao === 1 ? "carta marcada" : "cartas marcadas"} para sair em português{" "}
+          {semTraducao === 1 ? "não tem" : "não têm"} tradução ou molde. Revise em{" "}
+          <Link href="/admin/traducoes" className="underline">
+            Traduções
+          </Link>{" "}
+          ou marque o molde da arte no botão Molde.
+        </p>
+      )}
       {avisos.map((a) => (
         <p key={a.texto} role="alert" className={`rounded-xl border p-4 ${a.tipo === "erro" ? "border-rust bg-rust/30" : "border-gold"}`}>
           {a.texto}
@@ -347,7 +446,7 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
                 </button>
               </div>
             </div>
-            <Folha slots={lista} folha={folhaAtual} ajustes={ajustes} />
+            <Folha slots={lista} folha={folhaAtual} ajustes={ajustes} imagemDe={imagemDe} />
             <p className="text-muted">A4 em paisagem, 8 cartas por folha. O tracejado é a linha de corte.</p>
           </div>
 
@@ -400,10 +499,32 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
                         }}
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={sl.thumb} alt={sl.nome} loading="lazy" draggable={false} className="aspect-[63/88] w-full rounded-lg bg-ink object-cover" />
+                        <img src={imagemDe(sl)} alt={sl.nome} loading="lazy" draggable={false} className="aspect-[63/88] w-full rounded-lg bg-ink object-cover" />
                         <span className="truncate text-xs text-muted">
-                          {[sl.face > 0 ? "verso" : "", sl.lang.toUpperCase(), sl.origem].filter(Boolean).join(" · ")}
+                          {[sl.face > 0 ? "verso" : "", situacaoPT(sl) ?? sl.lang.toUpperCase(), sl.origem].filter(Boolean).join(" · ")}
                         </span>
+                        {emIngles(sl) && (
+                          <div className="grid grid-cols-2 gap-1">
+                            <button
+                              type="button"
+                              aria-pressed={sl.traduzida}
+                              aria-label={`Texto em português em ${sl.nome}`}
+                              className={`min-h-11 cursor-pointer rounded-md border text-xs font-bold ${sl.traduzida ? "border-gold bg-gold text-ink" : "border-edge"}`}
+                              onClick={() =>
+                                setSlots(lista.map((o) => (o.grupo === sl.grupo ? { ...o, traduzida: !sl.traduzida, lang: sl.traduzida ? "en" : "pt" } : o)))
+                              }
+                            >
+                              PT
+                            </button>
+                            <Link
+                              href={`/admin/moldes/${sl.printId}?face=${sl.face}`}
+                              target="_blank"
+                              className="flex min-h-11 items-center justify-center rounded-md border border-edge text-xs font-bold hover:border-cream"
+                            >
+                              Molde
+                            </Link>
+                          </div>
+                        )}
                         <div className="grid grid-cols-4 gap-1">
                           <button type="button" aria-label={`Mover ${sl.nome} para trás`} className="min-h-11 cursor-pointer rounded-md border border-edge text-sm disabled:opacity-40" disabled={i === 0} onClick={() => setSlots(moverSlot(lista, i, i - 1))}>
                             ◀

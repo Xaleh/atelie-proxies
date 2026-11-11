@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { CartaPrevia } from "@/components/CartaPrevia";
 import { Seal } from "@/components/Seal";
 import { loja } from "@/config/loja";
 import { useCart } from "@/lib/cart";
 import { parseDecklist } from "@/lib/decklist";
 import { brl } from "@/lib/format";
 import { calcularTotais, folhas, proximaFaixa } from "@/lib/pricing";
+import { useSituacoes, type Situacao } from "@/lib/traducao/carrinho";
 import { impressaoEscolhida, type CardPrint, type CartItem, type CatalogEntry } from "@/lib/types";
 
 async function json<T>(res: Response): Promise<T> {
@@ -88,7 +90,7 @@ function Busca() {
               <button
                 type="button"
                 className="btn btn-ghost px-4 text-sm"
-                onClick={() => adicionar([{ entry, qty: 1 }], entry.pt ? "pt" : "en")}
+                onClick={() => adicionar([{ entry, qty: 1 }], "pt")}
               >
                 Adicionar
               </button>
@@ -244,23 +246,31 @@ function Artes({ item, onClose }: { item: CartItem; onClose: () => void }) {
   );
 }
 
-function Tile({ item }: { item: CartItem }) {
+function Tile({ item, sit }: { item: CartItem; sit: Situacao }) {
   const { mudarIdioma, mudarQuantidade, remover } = useCart();
   const [artes, setArtes] = useState(false);
-  const print = impressaoEscolhida(item);
-  const nomePt = item.pt?.printedName;
-  const emPt = item.lang === "pt" && Boolean(item.pt);
+  const { print, modo } = sit;
+  const emPt = item.lang === "pt";
+  const nomePt = modo === "traduzida" ? sit.tr?.nome : modo === "oficial" ? print.printedName : (item.pt?.printedName ?? sit.tr?.nome);
+  const ptPossivel = Boolean(item.pt) || sit.podeTraduzir;
+  const traduzida = modo === "traduzida";
 
   return (
     <article className="panel flex min-w-0 flex-col gap-2.5 rounded-[14px] p-3">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={print.image} alt={`Carta ${print.printedName ?? print.name}`} loading="lazy" className="aspect-[63/88] w-full rounded-[9px] bg-ink object-cover" />
+      <CartaPrevia
+        url={print.image}
+        alt={`Carta ${nomePt && emPt ? nomePt : item.name}`}
+        className="aspect-[63/88] w-full rounded-[9px] bg-ink object-cover"
+        meta={traduzida ? print.meta : undefined}
+        tr={traduzida ? sit.tr : null}
+        molde={traduzida ? sit.molde : null}
+      />
       <div className="min-w-0">
         <div className="truncate font-bold">{emPt && nomePt ? nomePt : item.name}</div>
-        <div className="truncate text-[13px] text-muted">{emPt ? item.name : (nomePt ?? print.setName)}</div>
+        <div className="truncate text-[13px] text-muted">{emPt && nomePt ? item.name : (nomePt ?? print.setName)}</div>
       </div>
       <div>
-        <Seal item={item} />
+        <Seal modo={modo} carregando={sit.carregando} />
       </div>
       <div role="group" aria-label={`Idioma de ${item.name}`} className="flex overflow-hidden rounded-[10px] border-[1.5px] border-edge">
         <button
@@ -274,9 +284,9 @@ function Tile({ item }: { item: CartItem }) {
         <button
           type="button"
           aria-pressed={emPt}
-          disabled={!item.pt}
-          title={item.pt ? undefined : "Esta carta não tem impressão oficial em português"}
-          className={`min-h-11 flex-1 text-sm ${emPt ? "bg-rust font-bold text-cream" : "font-semibold text-muted"} ${item.pt ? "cursor-pointer" : "cursor-not-allowed opacity-40"}`}
+          disabled={!ptPossivel && !emPt}
+          title={ptPossivel ? undefined : sit.carregando ? "Verificando se existe tradução" : "Esta carta ainda não tem texto em português"}
+          className={`min-h-11 flex-1 text-sm ${emPt ? "bg-rust font-bold text-cream" : "font-semibold text-muted"} ${ptPossivel || emPt ? "cursor-pointer" : "cursor-not-allowed opacity-40"}`}
           onClick={() => mudarIdioma(item.oracleId, "pt")}
         >
           PT
@@ -303,11 +313,10 @@ function Tile({ item }: { item: CartItem }) {
   );
 }
 
-function Resumo() {
-  const { itens, quantidade, emPortugues } = useCart();
+function Resumo({ emPortugues, semPt }: { emPortugues: number; semPt: number }) {
+  const { quantidade } = useCart();
   const totais = calcularTotais(quantidade, "retirada");
   const proxima = proximaFaixa(quantidade);
-  const semPt = itens.filter((i) => !i.pt).length;
 
   return (
     <aside aria-label="Resumo do pedido" className="flex min-w-0 flex-[1_1_300px] flex-col gap-4 rounded-2xl bg-cream p-6 text-ink lg:sticky lg:top-6">
@@ -356,8 +365,8 @@ function Resumo() {
       )}
       {semPt > 0 && (
         <p className="text-[13px] text-paper-muted">
-          {semPt} {semPt === 1 ? "carta não tem" : "cartas não têm"} impressão oficial em português e{" "}
-          {semPt === 1 ? "sai" : "saem"} em inglês.
+          {semPt} {semPt === 1 ? "carta pedida em português ainda não tem" : "cartas pedidas em português ainda não têm"} texto
+          em português nesta arte e {semPt === 1 ? "sai" : "saem"} em inglês.
         </p>
       )}
       {quantidade > loja.maxCartasPorPedido && (
@@ -371,6 +380,8 @@ function Resumo() {
 
 export function Montador() {
   const { itens, pronto, quantidade, tudoEmPortugues, limpar } = useCart();
+  const { situacao, emPortugues } = useSituacoes(itens);
+  const semPt = itens.filter((i) => situacao(i).modo === "indisponivel" && !situacao(i).carregando).length;
 
   return (
     <>
@@ -407,11 +418,11 @@ export function Montador() {
           )}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(190px,1fr))] sm:gap-3.5">
             {itens.map((item) => (
-              <Tile key={item.oracleId} item={item} />
+              <Tile key={item.oracleId} item={item} sit={situacao(item)} />
             ))}
           </div>
         </section>
-        <Resumo />
+        <Resumo emPortugues={emPortugues} semPt={semPt} />
       </div>
     </>
   );

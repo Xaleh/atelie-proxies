@@ -30,6 +30,8 @@ export default async function ProducaoPage({
       code: p.order.code,
       itens: p.items.map((i) => ({
         printId: i.printId,
+        oracleId: i.oracleId,
+        traduzida: i.translated,
         nome: i.name,
         nomeImpresso: i.printedName,
         lang: i.lang,

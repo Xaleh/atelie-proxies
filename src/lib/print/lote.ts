@@ -1,3 +1,5 @@
+import type { MetaDeImpressao } from "../traducao/tipos";
+
 /**
  * O lote de produção: a lista de cartas na ordem em que vão para as folhas.
  * Cada posição é um "slot". Uma carta de duas faces ocupa dois slots do mesmo
@@ -9,21 +11,27 @@ export type FaceDeImpressao = { nome: string; normal: string; png: string };
 /** O que a produção precisa saber de uma impressão do Scryfall. */
 export type DetalheDeImpressao = {
   id: string;
+  oracleId?: string;
   nome: string;
   lang: string;
   set: string;
   collectorNumber: string;
   faces: FaceDeImpressao[];
+  /** Dados para escrever a tradução sobre a arte. */
+  meta?: MetaDeImpressao;
 };
 
 export type ItemDoPedido = {
   printId: string;
+  oracleId: string;
   nome: string;
   nomeImpresso: string | null;
   lang: "en" | "pt";
   /** Imagem de tamanho normal gravada no pedido. */
   image: string;
   quantidade: number;
+  /** Texto em português escrito sobre a arte em inglês. */
+  traduzida: boolean;
 };
 
 export type PedidoDoLote = { code: string; itens: ItemDoPedido[] };
@@ -34,7 +42,14 @@ export type Slot = {
   /** Frente e verso da mesma cópia compartilham o grupo. */
   grupo: number;
   printId: string;
+  oracleId: string;
   face: number;
+  /** Nome da face em inglês, chave da tradução. */
+  nomeEn: string;
+  set: string;
+  num: string;
+  /** Recebe o texto em português sobre a arte em inglês. */
+  traduzida: boolean;
   nome: string;
   lang: string;
   /** Imagem pequena para a tela. */
@@ -65,7 +80,8 @@ export function montarSlots(
   let grupo = 1;
   for (const pedido of pedidos) {
     for (const item of pedido.itens) {
-      const faces = facesDe(item, detalhes.get(item.printId));
+      const detalhe = detalhes.get(item.printId);
+      const faces = facesDe(item, detalhe);
       const usadas = versos ? faces : faces.slice(0, 1);
       for (let copia = 0; copia < item.quantidade; copia++) {
         const g = grupo++;
@@ -74,7 +90,12 @@ export function montarSlots(
             uid: `${g}-${face}`,
             grupo: g,
             printId: item.printId,
+            oracleId: item.oracleId,
             face,
+            nomeEn: detalhe?.meta?.faces[face]?.nome ?? item.nome.split(" // ")[face] ?? item.nome,
+            set: detalhe?.set ?? "",
+            num: detalhe?.collectorNumber ?? "",
+            traduzida: item.traduzida,
             nome: face === 0 ? (item.nomeImpresso ?? f.nome) : f.nome,
             lang: item.lang,
             thumb: f.normal,
@@ -94,12 +115,21 @@ export function ajustarVersos(slots: Slot[], detalhes: Map<string, DetalheDeImpr
   const out: Slot[] = [];
   for (const sl of slots) {
     out.push(sl);
-    const faces = detalhes.get(sl.printId)?.faces ?? [];
+    const detalhe = detalhes.get(sl.printId);
+    const faces = detalhe?.faces ?? [];
     const jaTemVerso = slots.some((o) => o.grupo === sl.grupo && o.face > 0);
     if (sl.face === 0 && faces.length > 1 && !jaTemVerso) {
       for (let face = 1; face < faces.length; face++) {
         const f = faces[face];
-        out.push({ ...sl, uid: `${sl.grupo}-${face}`, face, nome: f.nome, thumb: f.normal, png: f.png });
+        out.push({
+          ...sl,
+          uid: `${sl.grupo}-${face}`,
+          face,
+          nomeEn: detalhe?.meta?.faces[face]?.nome ?? f.nome,
+          nome: f.nome,
+          thumb: f.normal,
+          png: f.png,
+        });
       }
     }
   }

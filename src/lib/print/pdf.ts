@@ -6,8 +6,16 @@
 import { loja } from "@/config/loja";
 import { CARD_H, CARD_W, POR_FOLHA, computeLayout, type Ajustes, type Layout } from "./layout";
 import type { Slot } from "./lote";
+import { renderizarTraducao, type TextoParaDesenhar } from "../traducao/render";
+import type { MetaDeImpressao, MoldeManual } from "../traducao/tipos";
 
 type Progresso = (feitas: number, total: number, nome: string) => void;
+
+function hash(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
 
 const cacheJpeg = new Map<string, Uint8Array>();
 
@@ -22,8 +30,20 @@ async function baixarImagem(url: string): Promise<ImageBitmap> {
   return createImageBitmap(await r.blob());
 }
 
-async function cartaEmJpeg(url: string, s: Pick<Ajustes, "bleed" | "dpi" | "qual">): Promise<Uint8Array> {
-  const chave = `${url}|${s.bleed}|${s.qual}|${s.dpi}`;
+/** Tradução a escrever numa carta do lote, se houver. */
+export type TraducaoDoSlot = {
+  meta: MetaDeImpressao;
+  face: number;
+  tr: TextoParaDesenhar;
+  molde: MoldeManual | "auto";
+};
+
+async function cartaEmJpeg(
+  url: string,
+  s: Pick<Ajustes, "bleed" | "dpi" | "qual">,
+  traducao: TraducaoDoSlot | null,
+): Promise<Uint8Array> {
+  const chave = `${url}|${s.bleed}|${s.qual}|${s.dpi}|${traducao ? JSON.stringify([traducao.face, traducao.tr, traducao.molde]) : ""}`;
   const guardada = cacheJpeg.get(chave);
   if (guardada) return guardada;
 
@@ -41,6 +61,13 @@ async function cartaEmJpeg(url: string, s: Pick<Ajustes, "bleed" | "dpi" | "qual
     mg.drawImage(bmp, 0, 0, maior.width, maior.height);
     if ("close" in bmp) bmp.close();
     bmp = maior;
+  }
+  // O texto traduzido é desenhado já na resolução final, então sai nítido.
+  if (traducao) {
+    const comTexto = await renderizarTraducao(bmp, traducao.meta, traducao.face, traducao.tr, traducao.molde);
+    if ("close" in bmp) bmp.close();
+    else bmp.width = bmp.height = 0;
+    bmp = comTexto;
   }
 
   const W = bmp.width;
@@ -130,7 +157,12 @@ function marcasDeCorte(doc: Doc, L: Layout, bleed: number) {
 }
 
 /** Monta o PDF do lote: uma página A4 em paisagem para cada 8 cartas. */
-export async function gerarPdf(slots: Slot[], s: Ajustes, progresso?: Progresso): Promise<Blob> {
+export async function gerarPdf(
+  slots: Slot[],
+  s: Ajustes,
+  progresso?: Progresso,
+  traducaoDe: (sl: Slot) => TraducaoDoSlot | null = () => null,
+): Promise<Blob> {
   if (slots.length === 0) throw new Error("O lote está vazio.");
   const { jsPDF } = await import("jspdf");
   const L = computeLayout(s);
@@ -145,7 +177,8 @@ export async function gerarPdf(slots: Slot[], s: Ajustes, progresso?: Progresso)
       const pos = L.slots[k];
       const sl = pagina[k];
       progresso?.(p * POR_FOLHA + k, slots.length, sl.nome);
-      const dados = await cartaEmJpeg(sl.png, s);
+      const traducao = traducaoDe(sl);
+      const dados = await cartaEmJpeg(sl.png, s, traducao);
       doc.addImage(
         dados,
         "JPEG",
@@ -153,7 +186,7 @@ export async function gerarPdf(slots: Slot[], s: Ajustes, progresso?: Progresso)
         pos.y - s.bleed,
         CARD_W + 2 * s.bleed,
         CARD_H + 2 * s.bleed,
-        `${sl.printId}_${sl.face}_${s.bleed}_${s.qual}_${s.dpi}`,
+        `${sl.printId}_${sl.face}_${s.bleed}_${s.qual}_${s.dpi}${traducao ? "_pt" + hash(JSON.stringify([traducao.tr, traducao.molde])) : ""}`,
         "NONE",
       );
     }
