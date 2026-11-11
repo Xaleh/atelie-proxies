@@ -34,7 +34,7 @@ export default async function PedidoAdminPage({ params }: { params: Promise<{ co
   const { order, items, payments } = pedido;
 
   const emPortugues = items.reduce((n, i) => n + (i.lang === "pt" ? i.quantity : 0), 0);
-  // Lista no formato que a tela de produção atual aceita: uma carta por linha.
+  // Lista em texto, uma carta por linha, para colar em outra ferramenta se precisar.
   const lista = items.map((i) => `${i.quantity} ${i.name}`).join("\n");
   const linkCliente = `${siteUrl()}/pedido/${order.token}`;
 
@@ -72,8 +72,11 @@ export default async function PedidoAdminPage({ params }: { params: Promise<{ co
               </li>
             ))}
           </ul>
+          <Link href={`/admin/producao?pedidos=${order.code}`} className="btn btn-gold self-start">
+            Abrir na produção (folhas, PDF e gabarito)
+          </Link>
           <div className="panel flex flex-col gap-3 p-5">
-            <h3 className="text-[15px] font-bold">Lista para a produção</h3>
+            <h3 className="text-[15px] font-bold">Lista do pedido em texto</h3>
             <textarea readOnly rows={Math.min(10, items.length + 1)} value={lista} aria-label="Lista de cartas do pedido" className="field py-3 font-mono text-[13px]" />
             <CopiarBotao texto={lista} rotulo="Copiar lista" className="btn btn-ghost self-start" />
           </div>

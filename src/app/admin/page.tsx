@@ -43,11 +43,12 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       {pedidos.length === 0 ? (
         <p className="panel p-8 text-center text-muted">Nenhum pedido neste filtro.</p>
       ) : (
+        <form action="/admin/producao" method="get" className="flex flex-col gap-4">
         <div className="panel overflow-x-auto rounded-[14px]">
-          <table className="w-full min-w-[760px] border-collapse text-left">
+          <table className="w-full min-w-[800px] border-collapse text-left">
             <thead>
               <tr className="text-xs uppercase tracking-wider text-muted">
-                {["Código", "Cliente", "Cartas", "Em PT", "Total", "Status", "Recebido em", ""].map((h) => (
+                {["Lote", "Código", "Cliente", "Cartas", "Em PT", "Total", "Status", "Recebido em", ""].map((h) => (
                   <th key={h} scope="col" className="px-4 py-3.5 font-semibold">
                     {h}
                   </th>
@@ -57,6 +58,11 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             <tbody>
               {pedidos.map(({ order, emPortugues }) => (
                 <tr key={order.id} className="border-t border-line">
+                  <td className="px-4 py-1">
+                    <label className="flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
+                      <input type="checkbox" name="pedidos" value={order.code} aria-label={`Incluir ${order.code} no lote de produção`} className="h-5 w-5" />
+                    </label>
+                  </td>
                   <td className="px-4 py-3 font-mono">{order.code}</td>
                   <td className="px-4 py-3">{order.customerName}</td>
                   <td className="px-4 py-3">{order.quantity}</td>
@@ -77,6 +83,13 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             </tbody>
           </table>
         </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="submit" className="btn btn-gold">
+            Abrir marcados na produção
+          </button>
+          <span className="text-muted">Marque um ou mais pedidos para imprimir juntos, na mesma folha.</span>
+        </div>
+        </form>
       )}
     </AdminShell>
   );

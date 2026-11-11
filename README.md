@@ -13,13 +13,16 @@ painel em `/admin`.
   no servidor, página de acompanhamento em `/pedido/<token>`.
 - **Pagamento:** Pix copia-e-cola com QR (confirmado à mão no painel) e
   Mercado Pago pelo Checkout Pro (confirmado sozinho pelo webhook).
-- **Painel:** login por senha, lista de pedidos, detalhe com as cartas, a lista
-  para a produção e a mudança de status com código de rastreio.
+- **Painel:** login por senha, lista de pedidos, detalhe com as cartas e a
+  mudança de status com código de rastreio.
+- **Produção:** em `/admin/producao`, um ou vários pedidos viram folhas A4 em
+  paisagem com 8 cartas. Dá para reordenar, duplicar, tirar e completar as
+  vagas com cartas avulsas, e baixar o PDF de impressão e o gabarito de corte
+  em DXF. A geometria e as marcas de registro são as mesmas do site de
+  produção anterior, então o gabarito da Silhouette Portrait 4 continua valendo.
 
 ## O que ainda não entrou
 
-- PDF de impressão e gabarito DXF dentro do painel. Por enquanto o painel
-  entrega a lista do pedido para colar na tela de produção atual.
 - Texto traduzido sobre a carta em inglês. Hoje o português vale só para cartas
   com impressão oficial em PT; as outras aparecem como "PT indisponível".
 - Envio de arte própria, fichas (tokens), One Piece e Pokémon.
@@ -77,6 +80,7 @@ Ficam em `src/config/loja.ts`. Os valores atuais são provisórios.
 | `src/app/api/webhooks/mercadopago` | Aviso de pagamento do Mercado Pago |
 | `src/app/admin` | Painel do ateliê |
 | `src/lib` | Regras: preço, Pix, Mercado Pago, Scryfall, pedidos, sessão |
+| `src/lib/print` | Folha de impressão: geometria, lote, PDF e gabarito DXF |
 | `src/lib/db` | Tabelas (Drizzle ORM) e conexão |
 | `drizzle` | Migrações do banco |
 | `tests` | Testes das regras |
