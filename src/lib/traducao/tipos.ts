@@ -3,7 +3,7 @@ import { z } from "zod";
 /**
  * Tipos e regras da tradução que valem no servidor e no navegador.
  * O texto em português é escrito sobre a arte em inglês por um "molde": o
- * automático, para a moldura moderna (2015), ou um manual, marcado no painel
+ * automático, para as molduras de 2015 e de 1993, ou um manual, marcado no painel
  * para uma impressão específica.
  */
 
@@ -38,6 +38,17 @@ export type MetaDeImpressao = {
   faces: MetaDeFace[];
 };
 
+const LAYOUTS_DE_DUAS_FACES = ["transform", "modal_dfc", "double_faced_token", "reversible_card"];
+
+/**
+ * Quantas cartas físicas a impressão ocupa na folha: o verso das cartas de
+ * duas faces é impresso como uma carta a mais.
+ */
+export function facesFisicas(meta: MetaDeImpressao | undefined | null): number {
+  if (!meta || !LAYOUTS_DE_DUAS_FACES.includes(meta.layout)) return 1;
+  return Math.max(1, meta.faces.length);
+}
+
 /** Retângulo em fração da largura e da altura da imagem (0 a 1). */
 export type Ret = { x: number; y: number; w: number; h: number };
 
@@ -46,7 +57,8 @@ export type MoldeManual = {
   nome: Ret | null;
   tipo: Ret | null;
   texto: Ret | null;
-  fundo: "cor" | "desfoque";
+  /** "limpar" apaga só as letras; "cor" pinta a caixa de uma cor; "desfoque" borra e escurece a arte. */
+  fundo: "limpar" | "cor" | "desfoque";
   corTexto: "auto" | "claro" | "escuro";
 };
 
@@ -68,7 +80,7 @@ export const moldeSchema = z.discriminatedUnion("modo", [
     nome: ret.nullable(),
     tipo: ret.nullable(),
     texto: ret.nullable(),
-    fundo: z.enum(["cor", "desfoque"]),
+    fundo: z.enum(["limpar", "cor", "desfoque"]),
     corTexto: z.enum(["auto", "claro", "escuro"]),
   }),
   z.object({ modo: z.literal("bloqueado") }),
@@ -93,14 +105,15 @@ export function chaveDoSabor(nome: string, set: string, num: string): string {
 
 const TIPOS_SEM_MOLDE = /Planeswalker|Saga|Battle|Class|Case|Siege/i;
 
-/** A moldura moderna padrão, que o molde automático sabe cobrir. */
+/**
+ * Molduras que o molde automático sabe reescrever: a moderna (2015) e a antiga
+ * (1993, de Alpha a Mirage e 30th Edition), só em cartas de layout comum.
+ */
 export function aceitaMoldeAutomatico(meta: MetaDeImpressao | undefined | null): boolean {
-  if (!meta) return false;
-  return (
-    meta.frame === "2015" &&
-    ["normal", "transform", "modal_dfc"].includes(meta.layout) &&
-    !TIPOS_SEM_MOLDE.test(meta.tipo)
-  );
+  if (!meta || TIPOS_SEM_MOLDE.test(meta.tipo)) return false;
+  if (meta.frame === "2015") return ["normal", "transform", "modal_dfc"].includes(meta.layout);
+  if (meta.frame === "1993") return meta.layout === "normal";
+  return false;
 }
 
 /**

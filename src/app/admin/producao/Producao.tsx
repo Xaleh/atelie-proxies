@@ -14,16 +14,21 @@ import {
   type Ajustes,
 } from "@/lib/print/layout";
 import {
-  ajustarVersos,
+  completarVersos,
+  duplicarGrupo,
+  grupoDe,
   montarSlots,
   moverSlot,
+  moverUmaPosicao,
   pngDaImagemNormal,
   proximoGrupo,
+  tirarGrupo,
   type DetalheDeImpressao,
   type PedidoDoLote,
   type Slot,
 } from "@/lib/print/lote";
 import { baixarArquivo, gerarPdf, type TraducaoDoSlot } from "@/lib/print/pdf";
+import { facesFisicas } from "@/lib/traducao/tipos";
 import { useTraducoes } from "@/lib/traducao/cliente";
 import { previaTraduzida } from "@/lib/traducao/render";
 import type { CatalogEntry } from "@/lib/types";
@@ -238,7 +243,8 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
       if (!vivo) return;
       setAjustes(ajustesSalvos);
       setDetalhes(mapa);
-      setSlots(loteSalvo ?? montarSlots(pedidos, mapa, ajustesSalvos.versos));
+      // lotes guardados antes de o verso ser obrigatório ganham o verso logo depois da frente
+      setSlots(loteSalvo ? completarVersos(loteSalvo, mapa) : montarSlots(pedidos, mapa));
     })();
     return () => {
       vivo = false;
@@ -325,31 +331,45 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
     const novo = { ...ajustes, [k]: v };
     setAjustes(novo);
     gravar(CHAVE_AJUSTES, novo);
-    if (k === "versos" && slots) setSlots(ajustarVersos(slots, detalhes, Boolean(v)));
   }
 
-  function adicionarAvulsa(entry: CatalogEntry, lang: "en" | "pt") {
+  async function adicionarAvulsa(entry: CatalogEntry, lang: "en" | "pt") {
     const print = lang === "pt" && entry.pt ? entry.pt : entry.en;
     const grupo = proximoGrupo(lista);
-    setSlots([
-      ...lista,
-      {
-        uid: `${grupo}-0`,
-        grupo,
-        printId: print.id,
-        oracleId: print.oracleId,
-        face: 0,
-        nomeEn: print.meta?.faces[0]?.nome ?? print.name.split(" // ")[0],
-        set: print.set,
-        num: print.collectorNumber,
-        traduzida: false,
-        nome: print.printedName ?? print.name,
-        lang,
-        thumb: print.image,
-        png: pngDaImagemNormal(print.image),
-        origem: "avulsa",
-      },
-    ]);
+    const frente: Slot = {
+      uid: `${grupo}-0`,
+      grupo,
+      printId: print.id,
+      oracleId: print.oracleId,
+      face: 0,
+      nomeEn: print.meta?.faces[0]?.nome ?? print.name.split(" // ")[0],
+      set: print.set,
+      num: print.collectorNumber,
+      traduzida: false,
+      nome: print.printedName ?? print.name,
+      lang,
+      thumb: print.image,
+      png: pngDaImagemNormal(print.image),
+      origem: "avulsa",
+    };
+    setSlots(completarVersos([...lista, frente], detalhes));
+    if (facesFisicas(print.meta) < 2 || detalhes.has(print.id)) return;
+    // carta de duas faces que ainda não estava no lote: busca o verso
+    try {
+      const res = await fetch("/api/admin/prints", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [print.id] }),
+      });
+      const data = (await res.json()) as { prints?: DetalheDeImpressao[]; error?: string };
+      if (!res.ok || !data.prints?.length) throw new Error(data.error);
+      const mapa = new Map(detalhes);
+      for (const d of data.prints) mapa.set(d.id, d);
+      setDetalhes(mapa);
+      setSlots((atual) => (atual ? completarVersos(atual, mapa) : atual));
+    } catch {
+      setAviso(`Não consegui buscar o verso de ${print.name}. Tire a carta e adicione de novo para tentar outra vez.`);
+    }
   }
 
   async function baixarPdf() {
@@ -526,26 +546,21 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
                           </div>
                         )}
                         <div className="grid grid-cols-4 gap-1">
-                          <button type="button" aria-label={`Mover ${sl.nome} para trás`} className="min-h-11 cursor-pointer rounded-md border border-edge text-sm disabled:opacity-40" disabled={i === 0} onClick={() => setSlots(moverSlot(lista, i, i - 1))}>
+                          <button type="button" aria-label={`Mover ${sl.nome} para trás`} className="min-h-11 cursor-pointer rounded-md border border-edge text-sm disabled:opacity-40" disabled={grupoDe(lista, i)[0] === 0} onClick={() => setSlots(moverUmaPosicao(lista, i, -1))}>
                             ◀
                           </button>
                           <button
                             type="button"
                             aria-label={`Mais uma cópia de ${sl.nome}`}
                             className="min-h-11 cursor-pointer rounded-md border border-edge text-xs font-bold"
-                            onClick={() => {
-                              const grupo = proximoGrupo(lista);
-                              const copia = [...lista];
-                              copia.splice(i + 1, 0, { ...sl, grupo, uid: `${grupo}-${sl.face}` });
-                              setSlots(copia);
-                            }}
+                            onClick={() => setSlots(duplicarGrupo(lista, i))}
                           >
                             +1
                           </button>
-                          <button type="button" aria-label={`Tirar ${sl.nome}`} className="min-h-11 cursor-pointer rounded-md border border-edge text-sm" onClick={() => setSlots(lista.filter((_, k) => k !== i))}>
+                          <button type="button" aria-label={`Tirar ${sl.nome}`} className="min-h-11 cursor-pointer rounded-md border border-edge text-sm" onClick={() => setSlots(tirarGrupo(lista, i))}>
                             ✕
                           </button>
-                          <button type="button" aria-label={`Mover ${sl.nome} para frente`} className="min-h-11 cursor-pointer rounded-md border border-edge text-sm disabled:opacity-40" disabled={i === lista.length - 1} onClick={() => setSlots(moverSlot(lista, i, i + 1))}>
+                          <button type="button" aria-label={`Mover ${sl.nome} para frente`} className="min-h-11 cursor-pointer rounded-md border border-edge text-sm disabled:opacity-40" disabled={grupoDe(lista, i)[1] === lista.length - 1} onClick={() => setSlots(moverUmaPosicao(lista, i, 1))}>
                             ▶
                           </button>
                         </div>
@@ -579,7 +594,7 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
               className="min-h-11 cursor-pointer self-start underline hover:text-gold-soft"
               onClick={() => {
                 if (window.confirm("Desfazer as mudanças e voltar ao conteúdo dos pedidos?")) {
-                  setSlots(montarSlots(pedidos, detalhes, ajustes.versos));
+                  setSlots(montarSlots(pedidos, detalhes));
                   setFolha(0);
                 }
               }}
@@ -633,7 +648,6 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
                 [
                   ["marks", "Marcas de registro da Silhouette"],
                   ["crop", "Marcas de corte para guilhotina"],
-                  ["versos", "Imprimir o verso das cartas de duas faces"],
                 ] as const
               ).map(([k, rotulo]) => (
                 <label key={k} className="flex min-h-11 items-center gap-2.5">

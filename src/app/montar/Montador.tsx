@@ -9,6 +9,7 @@ import { useCart } from "@/lib/cart";
 import { parseDecklist } from "@/lib/decklist";
 import { brl } from "@/lib/format";
 import { calcularTotais, folhas, proximaFaixa } from "@/lib/pricing";
+import { facesFisicas } from "@/lib/traducao/tipos";
 import { useSituacoes, type Situacao } from "@/lib/traducao/carrinho";
 import { impressaoEscolhida, type CardPrint, type CartItem, type CatalogEntry } from "@/lib/types";
 
@@ -269,8 +270,13 @@ function Tile({ item, sit }: { item: CartItem; sit: Situacao }) {
         <div className="truncate font-bold">{emPt && nomePt ? nomePt : item.name}</div>
         <div className="truncate text-[13px] text-muted">{emPt && nomePt ? item.name : (nomePt ?? print.setName)}</div>
       </div>
-      <div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <Seal modo={modo} carregando={sit.carregando} />
+        {facesFisicas(print.meta) > 1 && (
+          <span className="text-[12px] text-muted" title="Carta de duas faces: o verso é impresso junto, como uma carta a mais na folha">
+            + verso
+          </span>
+        )}
       </div>
       <div role="group" aria-label={`Idioma de ${item.name}`} className="flex overflow-hidden rounded-[10px] border-[1.5px] border-edge">
         <button
@@ -313,7 +319,7 @@ function Tile({ item, sit }: { item: CartItem; sit: Situacao }) {
   );
 }
 
-function Resumo({ emPortugues, semPt }: { emPortugues: number; semPt: number }) {
+function Resumo({ emPortugues, semPt, versos }: { emPortugues: number; semPt: number; versos: number }) {
   const { quantidade } = useCart();
   const totais = calcularTotais(quantidade, "retirada");
   const proxima = proximaFaixa(quantidade);
@@ -325,7 +331,7 @@ function Resumo({ emPortugues, semPt }: { emPortugues: number; semPt: number }) 
         {[
           ["Cartas", quantidade],
           ["Em português", emPortugues],
-          ["Folhas A4", folhas(quantidade)],
+          ["Folhas A4", folhas(quantidade + versos)],
         ].map(([rotulo, valor]) => (
           <div key={rotulo} className="flex justify-between gap-3">
             <dt>{rotulo}</dt>
@@ -333,6 +339,11 @@ function Resumo({ emPortugues, semPt }: { emPortugues: number; semPt: number }) 
           </div>
         ))}
       </dl>
+      {versos > 0 && (
+        <p className="-mt-2 text-[13px] text-paper-muted">
+          As folhas incluem {versos} {versos === 1 ? "verso" : "versos"} de cartas de duas faces, que {versos === 1 ? "sai" : "saem"} junto com a frente.
+        </p>
+      )}
       <div className="flex flex-col gap-2 border-t border-paper-line pt-4">
         <div className="flex justify-between gap-3">
           <span>Preço por carta</span>
@@ -382,6 +393,8 @@ export function Montador() {
   const { itens, pronto, quantidade, tudoEmPortugues, limpar } = useCart();
   const { situacao, emPortugues } = useSituacoes(itens);
   const semPt = itens.filter((i) => situacao(i).modo === "indisponivel" && !situacao(i).carregando).length;
+  // o verso das cartas de duas faces ocupa uma vaga na folha, mas não entra na conta de cartas pedidas
+  const versos = itens.reduce((n, i) => n + i.qty * (facesFisicas(situacao(i).print.meta) - 1), 0);
 
   return (
     <>
@@ -422,7 +435,7 @@ export function Montador() {
             ))}
           </div>
         </section>
-        <Resumo emPortugues={emPortugues} semPt={semPt} />
+        <Resumo emPortugues={emPortugues} semPt={semPt} versos={versos} />
       </div>
     </>
   );

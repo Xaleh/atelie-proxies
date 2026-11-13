@@ -3,7 +3,7 @@ import type { MetaDeImpressao } from "../traducao/tipos";
 /**
  * O lote de produção: a lista de cartas na ordem em que vão para as folhas.
  * Cada posição é um "slot". Uma carta de duas faces ocupa dois slots do mesmo
- * grupo (frente e verso) quando a opção de imprimir versos está ligada.
+ * grupo (frente e verso), que é sempre impresso e movido junto.
  */
 
 export type FaceDeImpressao = { nome: string; normal: string; png: string };
@@ -71,21 +71,16 @@ function facesDe(item: ItemDoPedido, detalhe: DetalheDeImpressao | undefined): F
   return [{ nome: item.nomeImpresso ?? item.nome, normal: item.image, png: pngDaImagemNormal(item.image) }];
 }
 
-export function montarSlots(
-  pedidos: PedidoDoLote[],
-  detalhes: Map<string, DetalheDeImpressao>,
-  versos: boolean,
-): Slot[] {
+export function montarSlots(pedidos: PedidoDoLote[], detalhes: Map<string, DetalheDeImpressao>): Slot[] {
   const slots: Slot[] = [];
   let grupo = 1;
   for (const pedido of pedidos) {
     for (const item of pedido.itens) {
       const detalhe = detalhes.get(item.printId);
       const faces = facesDe(item, detalhe);
-      const usadas = versos ? faces : faces.slice(0, 1);
       for (let copia = 0; copia < item.quantidade; copia++) {
         const g = grupo++;
-        usadas.forEach((f, face) => {
+        faces.forEach((f, face) => {
           slots.push({
             uid: `${g}-${face}`,
             grupo: g,
@@ -109,39 +104,80 @@ export function montarSlots(
   return slots;
 }
 
-/** Liga ou desliga os versos num lote que já foi reordenado, sem perder a ordem. */
-export function ajustarVersos(slots: Slot[], detalhes: Map<string, DetalheDeImpressao>, versos: boolean): Slot[] {
-  if (!versos) return slots.filter((sl) => sl.face === 0);
+/**
+ * Garante o verso logo depois de cada frente de carta de duas faces. Serve
+ * para lotes guardados antes de o verso ser obrigatório e para cartas avulsas.
+ */
+export function completarVersos(slots: Slot[], detalhes: Map<string, DetalheDeImpressao>): Slot[] {
+  const comVerso = new Set(slots.filter((sl) => sl.face > 0).map((sl) => sl.grupo));
   const out: Slot[] = [];
   for (const sl of slots) {
     out.push(sl);
     const detalhe = detalhes.get(sl.printId);
     const faces = detalhe?.faces ?? [];
-    const jaTemVerso = slots.some((o) => o.grupo === sl.grupo && o.face > 0);
-    if (sl.face === 0 && faces.length > 1 && !jaTemVerso) {
-      for (let face = 1; face < faces.length; face++) {
-        const f = faces[face];
-        out.push({
-          ...sl,
-          uid: `${sl.grupo}-${face}`,
-          face,
-          nomeEn: detalhe?.meta?.faces[face]?.nome ?? f.nome,
-          nome: f.nome,
-          thumb: f.normal,
-          png: f.png,
-        });
-      }
+    if (sl.face !== 0 || faces.length < 2 || comVerso.has(sl.grupo)) continue;
+    for (let face = 1; face < faces.length; face++) {
+      const f = faces[face];
+      out.push({
+        ...sl,
+        uid: `${sl.grupo}-${face}`,
+        face,
+        nomeEn: detalhe?.meta?.faces[face]?.nome ?? f.nome,
+        nome: f.nome,
+        thumb: f.normal,
+        png: f.png,
+      });
     }
   }
-  return out;
+  return out.length === slots.length ? slots : out;
 }
 
+/** Primeira e última posição do grupo (frente e verso da mesma cópia), que ficam sempre lado a lado. */
+export function grupoDe(slots: Slot[], i: number): [number, number] {
+  const g = slots[i].grupo;
+  let a = i, b = i;
+  while (a > 0 && slots[a - 1].grupo === g) a--;
+  while (b < slots.length - 1 && slots[b + 1].grupo === g) b++;
+  return [a, b];
+}
+
+/**
+ * Leva a carta da posição `de` (com o verso junto) para o lugar da carta em
+ * `para`: antes dela quando vai para trás, depois dela quando vai para frente.
+ * Nunca cai no meio da frente e do verso de outra carta.
+ */
 export function moverSlot(slots: Slot[], de: number, para: number): Slot[] {
-  if (de === para || de < 0 || de >= slots.length) return slots;
+  if (de === para || de < 0 || de >= slots.length || slots.length === 0) return slots;
+  para = Math.max(0, Math.min(para, slots.length - 1));
+  const [a, b] = grupoDe(slots, de);
+  if (para >= a && para <= b) return slots;
+  const [pa, pb] = grupoDe(slots, para);
   const copia = [...slots];
-  const [sl] = copia.splice(de, 1);
-  copia.splice(Math.max(0, Math.min(para, copia.length)), 0, sl);
+  const bloco = copia.splice(a, b - a + 1);
+  copia.splice(para < a ? pa : pb + 1 - bloco.length, 0, ...bloco);
   return copia;
+}
+
+/** Uma posição para trás (-1) ou para frente (+1), pulando o par inteiro da carta vizinha. */
+export function moverUmaPosicao(slots: Slot[], i: number, sentido: -1 | 1): Slot[] {
+  const [a, b] = grupoDe(slots, i);
+  if (sentido < 0) return a > 0 ? moverSlot(slots, i, a - 1) : slots;
+  return b < slots.length - 1 ? moverSlot(slots, i, b + 1) : slots;
+}
+
+/** Mais uma cópia da carta, com o verso, logo depois dela. */
+export function duplicarGrupo(slots: Slot[], i: number): Slot[] {
+  const [a, b] = grupoDe(slots, i);
+  const grupo = proximoGrupo(slots);
+  const copia = [...slots];
+  copia.splice(b + 1, 0, ...slots.slice(a, b + 1).map((sl) => ({ ...sl, grupo, uid: `${grupo}-${sl.face}` })));
+  return copia;
+}
+
+/** Tira a carta do lote, frente e verso. */
+export function tirarGrupo(slots: Slot[], i: number): Slot[] {
+  const [a, b] = grupoDe(slots, i);
+  return slots.filter((_, k) => k < a || k > b);
 }
 
 export function proximoGrupo(slots: Slot[]): number {
