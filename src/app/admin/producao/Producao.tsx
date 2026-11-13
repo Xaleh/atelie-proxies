@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { EscolhaDeArte } from "@/components/EscolhaDeArte";
 import { gerarDxf } from "@/lib/print/dxf";
 import {
   AJUSTES_PADRAO,
@@ -15,6 +16,8 @@ import {
 } from "@/lib/print/layout";
 import {
   completarVersos,
+  copiasDaCarta,
+  detalheDaFrente,
   duplicarGrupo,
   grupoDe,
   montarSlots,
@@ -23,6 +26,7 @@ import {
   pngDaImagemNormal,
   proximoGrupo,
   tirarGrupo,
+  trocarArte,
   type DetalheDeImpressao,
   type PedidoDoLote,
   type Slot,
@@ -31,7 +35,7 @@ import { baixarArquivo, gerarPdf, type TraducaoDoSlot } from "@/lib/print/pdf";
 import { facesFisicas } from "@/lib/traducao/tipos";
 import { useTraducoes } from "@/lib/traducao/cliente";
 import { previaTraduzida } from "@/lib/traducao/render";
-import type { CatalogEntry } from "@/lib/types";
+import type { CardPrint, CatalogEntry } from "@/lib/types";
 
 const CHAVE_AJUSTES = "proxy-do-reis:producao:ajustes:v1";
 const chaveDoLote = (pedidos: PedidoDoLote[]) =>
@@ -51,6 +55,18 @@ function gravar(chave: string, valor: unknown) {
   } catch {
     // Sem armazenamento, o lote vale só enquanto a aba estiver aberta.
   }
+}
+
+/** Faces e imagens de impressão no Scryfall, pelo painel. */
+async function buscarDetalhes(ids: string[]): Promise<DetalheDeImpressao[]> {
+  const res = await fetch("/api/admin/prints", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  const data = (await res.json()) as { prints?: DetalheDeImpressao[]; error?: string };
+  if (!res.ok) throw new Error(data.error);
+  return data.prints ?? [];
 }
 
 function Numero({
@@ -95,11 +111,14 @@ function Folha({
   folha,
   ajustes,
   imagemDe,
+  onClicar,
 }: {
   slots: Slot[];
   folha: number;
   ajustes: Ajustes;
   imagemDe: (sl: Slot) => string;
+  /** Clique numa carta da prévia; `null` quando a carta não tem o que abrir. */
+  onClicar: (sl: Slot) => (() => void) | null;
 }) {
   const L = computeLayout(ajustes);
   const b = ajustes.bleed;
@@ -127,7 +146,19 @@ function Folha({
               <rect x={p.x - b} y={p.y - b} width={CARD_W + 2 * b} height={CARD_H + 2 * b} fill={sl ? "#222" : "#eef1f3"} />
             )}
             {sl ? (
-              <image href={imagemDe(sl)} x={p.x} y={p.y} width={CARD_W} height={CARD_H} preserveAspectRatio="none" clipPath={`url(#corte-${k})`} />
+              <image
+                href={imagemDe(sl)}
+                x={p.x}
+                y={p.y}
+                width={CARD_W}
+                height={CARD_H}
+                preserveAspectRatio="none"
+                clipPath={`url(#corte-${k})`}
+                className={onClicar(sl) ? "cursor-pointer" : undefined}
+                onClick={onClicar(sl) ?? undefined}
+              >
+                <title>{onClicar(sl) ? `${sl.nome}: clique para trocar a arte` : sl.nome}</title>
+              </image>
             ) : (
               <rect x={p.x} y={p.y} width={CARD_W} height={CARD_H} rx={ajustes.radius} fill="#f6f7f8" />
             )}
@@ -215,6 +246,8 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
   const [status, setStatus] = useState("");
   const [progresso, setProgresso] = useState<number | null>(null);
   const arrastando = useRef<number | null>(null);
+  /** Carta com a troca de arte aberta (pelo grupo) e se a troca vale para todas as cópias. */
+  const [trocando, setTrocando] = useState<{ grupo: number; todas: boolean } | null>(null);
 
   // Abre o lote: ajustes e ordem salvos neste navegador, mais os detalhes das cartas no Scryfall.
   useEffect(() => {
@@ -353,7 +386,12 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
       origem: "avulsa",
     };
     setSlots(completarVersos([...lista, frente], detalhes));
-    if (facesFisicas(print.meta) < 2 || detalhes.has(print.id)) return;
+    if (detalhes.has(print.id)) return;
+    if (facesFisicas(print.meta) < 2) {
+      // a moldura da carta fica à mão para o botão PT funcionar sem recarregar
+      setDetalhes((atual) => new Map(atual).set(print.id, detalheDaFrente(print)));
+      return;
+    }
     // carta de duas faces que ainda não estava no lote: busca o verso
     try {
       const res = await fetch("/api/admin/prints", {
@@ -370,6 +408,41 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
     } catch {
       setAviso(`Não consegui buscar o verso de ${print.name}. Tire a carta e adicione de novo para tentar outra vez.`);
     }
+  }
+
+  // A troca de arte precisa do oracle_id; lotes antigos podem ter guardado a carta sem ele.
+  const oracleDe = (sl: Slot) => sl.oracleId || detalhes.get(sl.printId)?.oracleId || "";
+  const abrirTroca = (sl: Slot) => {
+    if (oracleDe(sl)) setTrocando({ grupo: sl.grupo, todas: false });
+  };
+  const posicaoTrocando = trocando ? lista.findIndex((sl) => sl.grupo === trocando.grupo) : -1;
+  const cartaTrocando = posicaoTrocando >= 0 ? lista[posicaoTrocando] : null;
+
+  async function escolherArte(print: CardPrint) {
+    if (!trocando) return;
+    const { grupo, todas } = trocando;
+    let nova = detalhes.get(print.id);
+    if (!nova?.faces.length) {
+      if (facesFisicas(print.meta) < 2) nova = detalheDaFrente(print);
+      else {
+        // carta de duas faces: a busca de artes só traz a frente
+        try {
+          nova = (await buscarDetalhes([print.id])).find((d) => d.id === print.id);
+          if (!nova?.faces.length) throw new Error();
+        } catch {
+          setAviso(`Não consegui buscar o verso de ${print.name} nesta arte. A carta ficou com a arte anterior; tente trocar de novo.`);
+          return;
+        }
+      }
+      const detalhe = nova;
+      setDetalhes((atual) => new Map(atual).set(detalhe.id, detalhe));
+    }
+    const detalhe = nova;
+    setSlots((atual) => {
+      if (!atual) return atual;
+      const i = atual.findIndex((sl) => sl.grupo === grupo);
+      return i < 0 ? atual : trocarArte(atual, i, detalhe, todas);
+    });
   }
 
   async function baixarPdf() {
@@ -466,12 +539,13 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
                 </button>
               </div>
             </div>
-            <Folha slots={lista} folha={folhaAtual} ajustes={ajustes} imagemDe={imagemDe} />
+            <Folha slots={lista} folha={folhaAtual} ajustes={ajustes} imagemDe={imagemDe} onClicar={(sl) => (oracleDe(sl) ? () => abrirTroca(sl) : null)} />
             <p className="text-muted">A4 em paisagem, 8 cartas por folha. O tracejado é a linha de corte.</p>
           </div>
 
           <div className="flex flex-col gap-4">
             <h2 className="font-display text-[28px] font-bold uppercase tracking-wide">Montar folhas</h2>
+            <p className="-mt-2 text-muted">Clique numa carta para trocar a arte. Arraste para mudar de lugar.</p>
             {Array.from({ length: folhas }, (_, f) => (
               <section key={f} aria-label={`Folha ${f + 1}`} className={`panel p-3 ${f === folhaAtual ? "border-gold" : ""}`}>
                 <div className="mb-2 flex items-center justify-between gap-3">
@@ -518,8 +592,27 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
                           if (arrastando.current != null) setSlots(moverSlot(lista, arrastando.current, i));
                         }}
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={imagemDe(sl)} alt={sl.nome} loading="lazy" draggable={false} className="aspect-[63/88] w-full rounded-lg bg-ink object-cover" />
+                        {oracleDe(sl) ? (
+                          // div em vez de button: no Firefox, um button não deixa arrastar a carta
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Trocar a arte de ${sl.nome}`}
+                            className="cursor-pointer rounded-lg ring-gold hover:ring-2"
+                            onClick={() => abrirTroca(sl)}
+                            onKeyDown={(e) => {
+                              if (e.key !== "Enter" && e.key !== " ") return;
+                              e.preventDefault();
+                              abrirTroca(sl);
+                            }}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={imagemDe(sl)} alt={sl.nome} loading="lazy" draggable={false} className="aspect-[63/88] w-full rounded-lg bg-ink object-cover" />
+                          </div>
+                        ) : (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={imagemDe(sl)} alt={sl.nome} loading="lazy" draggable={false} className="aspect-[63/88] w-full rounded-lg bg-ink object-cover" />
+                        )}
                         <span className="truncate text-xs text-muted">
                           {[sl.face > 0 ? "verso" : "", situacaoPT(sl) ?? sl.lang.toUpperCase(), sl.origem].filter(Boolean).join(" · ")}
                         </span>
@@ -691,6 +784,28 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
           </details>
         </aside>
       </div>
+
+      {trocando && cartaTrocando && (
+        <EscolhaDeArte
+          key={trocando.grupo}
+          oracleId={oracleDe(cartaTrocando)}
+          nome={cartaTrocando.nome}
+          atualId={cartaTrocando.printId}
+          onEscolher={escolherArte}
+          onClose={() => setTrocando(null)}
+        >
+          {copiasDaCarta(lista, posicaoTrocando) > 1 ? (
+            <label className="flex min-h-11 items-center gap-2.5">
+              <input
+                type="checkbox"
+                checked={trocando.todas}
+                onChange={(e) => setTrocando({ ...trocando, todas: e.target.checked })}
+              />
+              Trocar nas {copiasDaCarta(lista, posicaoTrocando)} cópias desta carta no lote
+            </label>
+          ) : null}
+        </EscolhaDeArte>
+      )}
     </div>
   );
 }

@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { CartaPrevia } from "@/components/CartaPrevia";
+import { EscolhaDeArte } from "@/components/EscolhaDeArte";
 import { Seal } from "@/components/Seal";
 import { useCart } from "@/lib/cart";
 import { parseDecklist } from "@/lib/decklist";
@@ -13,7 +14,7 @@ import { calcularPedido, folhas, proximaFaixa, type Tabela } from "@/lib/pricing
 import { facesFisicas } from "@/lib/traducao/tipos";
 import { Acessorios } from "./Acessorios";
 import { useSituacoes, type Situacao } from "@/lib/traducao/carrinho";
-import { impressaoEscolhida, type CardPrint, type CartItem, type CatalogEntry } from "@/lib/types";
+import type { CartItem, CatalogEntry } from "@/lib/types";
 
 async function json<T>(res: Response): Promise<T> {
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
@@ -187,70 +188,8 @@ function Lista() {
   );
 }
 
-function Artes({ item, onClose }: { item: CartItem; onClose: () => void }) {
-  const { escolherArte } = useCart();
-  const ref = useRef<HTMLDialogElement>(null);
-  const [prints, setPrints] = useState<CardPrint[] | null>(null);
-  const [erro, setErro] = useState<string | null>(null);
-  const atual = impressaoEscolhida(item);
-
-  useEffect(() => {
-    ref.current?.showModal();
-    let vivo = true;
-    fetch(`/api/cards/prints?oracleId=${item.oracleId}`)
-      .then((r) => json<{ prints: CardPrint[] }>(r))
-      .then((d) => vivo && setPrints(d.prints))
-      .catch((e: Error) => vivo && setErro(e.message));
-    return () => {
-      vivo = false;
-    };
-  }, [item.oracleId]);
-
-  return (
-    <dialog
-      ref={ref}
-      onClose={onClose}
-      className="m-auto w-[min(920px,94vw)] rounded-2xl border border-line bg-surface p-0 text-cream backdrop:bg-black/70"
-    >
-      <div className="flex items-center justify-between gap-4 border-b border-line p-5">
-        <h2 className="font-display text-2xl font-bold uppercase tracking-wide">Artes de {item.name}</h2>
-        <button type="button" className="btn btn-ghost px-4 text-sm" onClick={() => ref.current?.close()}>
-          Fechar
-        </button>
-      </div>
-      <div className="max-h-[70vh] overflow-y-auto p-5">
-        {erro && <p className="text-gold-soft">{erro}</p>}
-        {!erro && !prints && <p className="text-muted">Carregando artes…</p>}
-        {prints && (
-          <ul className="grid grid-cols-[repeat(auto-fill,minmax(130px,1fr))] gap-3">
-            {prints.map((p) => (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  aria-pressed={p.id === atual.id}
-                  className={`flex w-full cursor-pointer flex-col gap-1.5 rounded-xl border-2 p-1.5 text-left ${p.id === atual.id ? "border-gold" : "border-transparent hover:border-edge"}`}
-                  onClick={() => {
-                    escolherArte(item.oracleId, p);
-                    ref.current?.close();
-                  }}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={p.image} alt="" loading="lazy" className="aspect-[63/88] w-full rounded-md bg-ink object-cover" />
-                  <span className="truncate text-xs text-muted">
-                    {p.setName} · {p.lang === "pt" ? "PT" : "EN"}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </dialog>
-  );
-}
-
 function Tile({ item, sit }: { item: CartItem; sit: Situacao }) {
-  const { mudarIdioma, mudarQuantidade, remover } = useCart();
+  const { escolherArte, mudarIdioma, mudarQuantidade, remover } = useCart();
   const [artes, setArtes] = useState(false);
   const { print, modo } = sit;
   const emPt = item.lang === "pt";
@@ -260,14 +199,30 @@ function Tile({ item, sit }: { item: CartItem; sit: Situacao }) {
 
   return (
     <article className="panel flex min-w-0 flex-col gap-2.5 rounded-[14px] p-3">
-      <CartaPrevia
-        url={print.image}
-        alt={`Carta ${nomePt && emPt ? nomePt : item.name}`}
-        className="aspect-[63/88] w-full rounded-[9px] bg-ink object-cover"
-        meta={traduzida ? print.meta : undefined}
-        tr={traduzida ? sit.tr : null}
-        molde={traduzida ? sit.molde : null}
-      />
+      <div className="group relative">
+        <CartaPrevia
+          url={print.image}
+          alt={`Carta ${nomePt && emPt ? nomePt : item.name}`}
+          className="aspect-[63/88] w-full rounded-[9px] bg-ink object-cover"
+          meta={traduzida ? print.meta : undefined}
+          tr={traduzida ? sit.tr : null}
+          molde={traduzida ? sit.molde : null}
+        />
+        {/* a carta inteira abre a troca de arte */}
+        <button
+          type="button"
+          aria-label={`Trocar a arte de ${item.name}`}
+          className="absolute inset-0 flex cursor-pointer items-start justify-end rounded-[9px] p-2"
+          onClick={() => setArtes(true)}
+        >
+          <span
+            aria-hidden="true"
+            className="rounded-full bg-ink/85 px-2.5 py-1 text-[11px] font-bold text-cream opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+          >
+            Trocar arte
+          </span>
+        </button>
+      </div>
       <div className="min-w-0">
         <div className="truncate font-bold">{emPt && nomePt ? nomePt : item.name}</div>
         <div className="truncate text-[13px] text-muted">{emPt && nomePt ? item.name : (nomePt ?? print.setName)}</div>
@@ -316,7 +271,15 @@ function Tile({ item, sit }: { item: CartItem; sit: Situacao }) {
           Trocar arte
         </button>
       </div>
-      {artes && <Artes item={item} onClose={() => setArtes(false)} />}
+      {artes && (
+        <EscolhaDeArte
+          oracleId={item.oracleId}
+          nome={item.name}
+          atualId={print.id}
+          onEscolher={(p) => escolherArte(item.oracleId, p)}
+          onClose={() => setArtes(false)}
+        />
+      )}
     </article>
   );
 }

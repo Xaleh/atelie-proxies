@@ -3,6 +3,8 @@ import { gerarDxf } from "@/lib/print/dxf";
 import { AJUSTES_PADRAO, MARCA, avisosDoLayout, computeLayout, folhasPara } from "@/lib/print/layout";
 import {
   completarVersos,
+  copiasDaCarta,
+  detalheDaFrente,
   duplicarGrupo,
   grupoDe,
   moverUmaPosicao,
@@ -10,6 +12,7 @@ import {
   montarSlots,
   moverSlot,
   pngDaImagemNormal,
+  trocarArte,
   type DetalheDeImpressao,
   type PedidoDoLote,
 } from "@/lib/print/lote";
@@ -166,6 +169,85 @@ describe("lote de produção", () => {
     expect(new Set(mais.map((s) => s.uid)).size).toBe(mais.length);
     expect(nomes(tirarGrupo(slots, 2))).toBe("Anel1 Anel2 Counterspell4");
     expect(nomes(tirarGrupo(slots, 0))).toBe("Anel2 Delver3 Insectile3 Counterspell4");
+  });
+
+  describe("troca de arte", () => {
+    const arteEn: DetalheDeImpressao = {
+      id: "simples-en", oracleId: "o1", nome: "Sol Ring", lang: "en", set: "lea", collectorNumber: "270",
+      faces: [{ nome: "Sol Ring", normal: normal("simples-en"), png: png("simples-en") }],
+    };
+    const artePt: DetalheDeImpressao = {
+      id: "contra-pt", oracleId: "o3", nome: "Counterspell", lang: "pt", set: "4ed", collectorNumber: "65",
+      faces: [{ nome: "Contramágica", normal: normal("contra-pt"), png: png("contra-pt") }],
+    };
+    const duplaNova: DetalheDeImpressao = {
+      id: "dupla-nova", oracleId: "o2", nome: "Delver of Secrets // Insectile Aberration", lang: "en", set: "mid", collectorNumber: "47",
+      faces: [
+        { nome: "Delver of Secrets", normal: normal("dupla-nova"), png: png("dupla-nova") },
+        { nome: "Insectile Aberration", normal: normal("dupla-nova", "back"), png: png("dupla-nova", "back") },
+      ],
+    };
+    const resumo = (slots: ReturnType<typeof montarSlots>) => slots.map((s) => `${s.printId}/${s.face}`).join(" ");
+
+    it("troca só a cópia clicada e mantém o lugar e o pedido de origem", () => {
+      const slots = montarSlots(pedidos, detalhes);
+      const novo = trocarArte(slots, 1, arteEn);
+      expect(resumo(novo)).toBe("simples/0 simples-en/0 dupla/0 dupla/1 sem-detalhe/0");
+      expect(novo[1]).toMatchObject({ uid: slots[1].uid, grupo: slots[1].grupo, origem: "PX-AAAA", set: "lea", num: "270", thumb: normal("simples-en"), png: png("simples-en") });
+      expect(novo[0]).toBe(slots[0]);
+    });
+
+    it("com a opção de todas as cópias, troca cada cópia da mesma carta", () => {
+      const slots = montarSlots(pedidos, detalhes);
+      expect(copiasDaCarta(slots, 0)).toBe(2);
+      expect(copiasDaCarta(slots, 3)).toBe(1);
+      expect(resumo(trocarArte(slots, 0, arteEn, true))).toBe("simples-en/0 simples-en/0 dupla/0 dupla/1 sem-detalhe/0");
+      // cópia que já estava com outra arte continua contando como a mesma carta
+      const misto = trocarArte(slots, 0, arteEn);
+      expect(copiasDaCarta(misto, 1)).toBe(2);
+    });
+
+    it("carta pedida em português numa arte em inglês passa a receber o texto traduzido", () => {
+      const slots = montarSlots(pedidos, detalhes); // Anel Solar: impressão oficial em português
+      expect(slots[0]).toMatchObject({ lang: "pt", traduzida: false });
+      expect(trocarArte(slots, 0, arteEn)[0]).toMatchObject({ lang: "pt", traduzida: true, nome: "Sol Ring", nomeEn: "Sol Ring" });
+    });
+
+    it("arte em português sai em português sem tradução por cima; a em inglês mantém o inglês", () => {
+      const slots = montarSlots(pedidos, detalhes);
+      expect(trocarArte(slots, 4, artePt)[4]).toMatchObject({ lang: "pt", traduzida: false, nome: "Contramágica", printId: "contra-pt" });
+      const outraEn = { ...arteEn, id: "contra-en", oracleId: "o3", nome: "Counterspell", faces: [{ nome: "Counterspell", normal: normal("contra-en"), png: png("contra-en") }] };
+      expect(trocarArte(slots, 4, outraEn)[4]).toMatchObject({ lang: "en", traduzida: false });
+    });
+
+    it("carta de duas faces troca frente e verso juntos, clicando em qualquer uma", () => {
+      const slots = montarSlots(pedidos, detalhes);
+      const novo = trocarArte(slots, 3, duplaNova);
+      expect(resumo(novo)).toBe("simples/0 simples/0 dupla-nova/0 dupla-nova/1 sem-detalhe/0");
+      expect(novo[3]).toMatchObject({ grupo: slots[3].grupo, png: png("dupla-nova", "back"), nomeEn: "Insectile Aberration", traduzida: true });
+      expect(new Set(novo.map((s) => s.uid)).size).toBe(novo.length);
+    });
+
+    it("arte de uma face só no lugar de uma de duas faces tira o verso", () => {
+      const slots = montarSlots(pedidos, detalhes);
+      const umaFace = { ...duplaNova, id: "dupla-frente", faces: duplaNova.faces.slice(0, 1) };
+      expect(resumo(trocarArte(slots, 2, umaFace))).toBe("simples/0 simples/0 dupla-frente/0 sem-detalhe/0");
+    });
+
+    it("sem faces ou fora do lote, não muda nada", () => {
+      const slots = montarSlots(pedidos, detalhes);
+      expect(trocarArte(slots, 0, { ...arteEn, faces: [] })).toBe(slots);
+      expect(trocarArte(slots, 99, arteEn)).toBe(slots);
+    });
+
+    it("monta os detalhes da frente a partir da busca de artes", () => {
+      const d = detalheDaFrente({
+        id: "x", oracleId: "o9", name: "Lightning Bolt", printedName: "Raio", lang: "pt", set: "m10", setName: "Magic 2010",
+        collectorNumber: "146", image: normal("x"),
+      });
+      expect(d).toMatchObject({ id: "x", oracleId: "o9", lang: "pt", set: "m10", collectorNumber: "146" });
+      expect(d.faces).toEqual([{ nome: "Raio", normal: normal("x"), png: png("x") }]);
+    });
   });
 
   it("move posições dentro dos limites", () => {
