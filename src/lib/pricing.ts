@@ -1,4 +1,5 @@
 import { loja } from "@/config/loja";
+import { comboDoPedido, descontoEmCentavos, type Combo, type Combos, type Linha, type Produto } from "./acessorios";
 import type { Valores } from "./valores";
 
 export type Entrega = "envio" | "retirada";
@@ -25,6 +26,45 @@ export function calcularTotais(valores: Valores, quantidade: number, entrega: En
   const subtotal = unitario * quantidade;
   const frete = entrega === "envio" && quantidade > 0 ? valores.freteFixoCentavos : 0;
   return { unitario, subtotal, frete, total: subtotal + frete };
+}
+
+/** Tudo o que define o preço de um pedido, como está em vigor no painel. */
+export type Tabela = {
+  valores: Valores;
+  /** Acessórios disponíveis na loja. */
+  produtos: Produto[];
+  combos: Combos;
+};
+
+export type TotaisDoPedido = {
+  unitario: number;
+  /** Só as cartas. */
+  subtotal: number;
+  acessorios: number;
+  combo: Combo | null;
+  desconto: number;
+  frete: number;
+  total: number;
+};
+
+/**
+ * Conta completa do pedido: cartas, acessórios, desconto do combo e frete.
+ * O desconto vale sobre cartas + acessórios; o frete fica de fora.
+ */
+export function calcularPedido(tabela: Tabela, quantidade: number, entrega: Entrega, linhas: Linha[]): TotaisDoPedido {
+  const cartas = calcularTotais(tabela.valores, quantidade, entrega);
+  const acessorios = linhas.reduce((n, l) => n + l.produto.centavos * l.qty, 0);
+  const formado = comboDoPedido(quantidade, linhas);
+  const desconto = formado ? descontoEmCentavos(tabela.combos[formado], cartas.subtotal + acessorios) : 0;
+  return {
+    unitario: cartas.unitario,
+    subtotal: cartas.subtotal,
+    acessorios,
+    combo: desconto > 0 ? formado : null,
+    desconto,
+    frete: cartas.frete,
+    total: cartas.subtotal + acessorios - desconto + cartas.frete,
+  };
 }
 
 export function folhas(quantidade: number): number {

@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useCart } from "@/lib/cart";
 import { brl } from "@/lib/format";
-import { calcularTotais, type Entrega } from "@/lib/pricing";
+import { LinhasDeAcessorios } from "@/components/ContaDoPedido";
+import { linhasDe } from "@/lib/acessorios";
+import { calcularPedido, type Entrega, type Tabela } from "@/lib/pricing";
 import { useSituacoes } from "@/lib/traducao/carrinho";
-import type { Valores } from "@/lib/valores";
 
 type Erros = Partial<Record<"nome" | "contato" | "cep" | "endereco" | "itens" | "pedido", string>>;
 
@@ -20,9 +21,9 @@ function Erro({ id, texto }: { id: string; texto?: string }) {
   );
 }
 
-export function Fechamento({ valores: valoresIniciais }: { valores: Valores }) {
+export function Fechamento({ tabela: tabelaInicial }: { tabela: Tabela }) {
   const router = useRouter();
-  const { itens, pronto, quantidade, limpar } = useCart();
+  const { itens, pronto, quantidade, acessorios, limpar } = useCart();
   const { situacao, emPortugues } = useSituacoes(itens);
   const verificando = itens.some((i) => i.lang === "pt" && situacao(i).carregando);
   const [entrega, setEntrega] = useState<Entrega>("envio");
@@ -30,8 +31,9 @@ export function Fechamento({ valores: valoresIniciais }: { valores: Valores }) {
   const [erros, setErros] = useState<Erros>({});
   const [falha, setFalha] = useState<string | null>(null);
   // Se o ateliê mudar os valores com esta página aberta, o site devolve os novos ao confirmar.
-  const [valores, setValores] = useState(valoresIniciais);
-  const totais = calcularTotais(valores, quantidade, entrega);
+  const [tabela, setTabela] = useState(tabelaInicial);
+  const linhas = linhasDe(acessorios, tabela.produtos);
+  const totais = calcularPedido(tabela, quantidade, entrega, linhas);
 
   async function enviar(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -52,6 +54,7 @@ export function Fechamento({ valores: valoresIniciais }: { valores: Valores }) {
           observacoes: form.get("observacoes") ?? "",
           site: form.get("site") ?? "",
           totalEsperado: totais.total,
+          acessorios: linhas.map((l) => ({ id: l.produto.id, qty: l.qty })),
           itens: itens.map((item) => {
             const { print: p, modo, tr } = situacao(item);
             const traduzida = modo === "traduzida";
@@ -70,9 +73,9 @@ export function Fechamento({ valores: valoresIniciais }: { valores: Valores }) {
           }),
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as { token?: string; error?: string; erros?: Erros; valores?: Valores };
+      const data = (await res.json().catch(() => ({}))) as { token?: string; error?: string; erros?: Erros; tabela?: Tabela };
       if (!res.ok || !data.token) {
-        if (data.valores) setValores(data.valores);
+        if (data.tabela) setTabela(data.tabela);
         setErros(data.erros ?? {});
         setFalha(data.error ?? "Não foi possível registrar o pedido. Tente de novo.");
         return;
@@ -185,6 +188,7 @@ export function Fechamento({ valores: valoresIniciais }: { valores: Valores }) {
             <dt>Em português</dt>
             <dd className="font-bold">{emPortugues}</dd>
           </div>
+          <LinhasDeAcessorios linhas={linhas} totais={totais} />
           <div className="flex justify-between gap-3">
             <dt>Frete</dt>
             <dd className="font-bold">{totais.frete ? brl(totais.frete) : "sem frete"}</dd>
@@ -205,7 +209,7 @@ export function Fechamento({ valores: valoresIniciais }: { valores: Valores }) {
           O pagamento vem na próxima tela: Pix direto ou Mercado Pago.
         </p>
         <Link href="/montar" className="py-2 text-sm font-semibold underline">
-          Voltar e ajustar as cartas
+          Voltar e ajustar o pedido
         </Link>
       </aside>
     </form>

@@ -6,6 +6,7 @@ import { CopiarBotao } from "@/app/pedido/[token]/Pagamento";
 import { AdminShell } from "@/components/AdminShell";
 import { StatusPill } from "@/components/StatusPill";
 import type { Status } from "@/lib/db/schema";
+import { NOME_DO_TIPO, ROTULO_DO_COMBO, type Combo } from "@/lib/acessorios";
 import { brl, dataHora } from "@/lib/format";
 import { pedidoPorCodigo } from "@/lib/orders";
 import { folhas } from "@/lib/pricing";
@@ -31,7 +32,7 @@ export default async function PedidoAdminPage({ params }: { params: Promise<{ co
   const { code } = await params;
   const pedido = await pedidoPorCodigo(code);
   if (!pedido) notFound();
-  const { order, items, payments } = pedido;
+  const { order, items, accessories, payments } = pedido;
 
   const emPortugues = items.reduce((n, i) => n + (i.lang === "pt" ? i.quantity : 0), 0);
   // Lista em texto, uma carta por linha, para colar em outra ferramenta se precisar.
@@ -75,6 +76,27 @@ export default async function PedidoAdminPage({ params }: { params: Promise<{ co
           <Link href={`/admin/producao?pedidos=${order.code}`} className="btn btn-gold self-start">
             Abrir na produção (folhas, PDF e gabarito)
           </Link>
+          {accessories.length > 0 && (
+            <div className="panel flex flex-col gap-3 border-gold p-5">
+              <h3 className="text-[15px] font-bold">Acessórios para separar</h3>
+              <ul className="flex flex-col">
+                {accessories.map((a) => (
+                  <li key={a.id} className="flex justify-between gap-3 border-t border-line py-2 first:border-t-0">
+                    <span className="min-w-0">
+                      <strong>
+                        {a.quantity} × {a.name}
+                      </strong>
+                      <span className="block text-muted">
+                        {NOME_DO_TIPO[a.kind].um}
+                        {a.description ? ` · ${a.description}` : ""}
+                      </span>
+                    </span>
+                    <span>{brl(a.unitCents * a.quantity)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="panel flex flex-col gap-3 p-5">
             <h3 className="text-[15px] font-bold">Lista do pedido em texto</h3>
             <textarea readOnly rows={Math.min(10, items.length + 1)} value={lista} aria-label="Lista de cartas do pedido" className="field py-3 font-mono text-[13px]" />
@@ -107,6 +129,20 @@ export default async function PedidoAdminPage({ params }: { params: Promise<{ co
               </span>
               <span>{brl(order.subtotalCents)}</span>
             </p>
+            {order.accessoriesCents > 0 && (
+              <p className="flex justify-between gap-3">
+                <span className="text-muted">Acessórios</span>
+                <span>{brl(order.accessoriesCents)}</span>
+              </p>
+            )}
+            {order.discountCents > 0 && (
+              <p className="flex justify-between gap-3">
+                <span className="text-muted">
+                  Desconto do combo{order.combo && order.combo in ROTULO_DO_COMBO ? ` (${ROTULO_DO_COMBO[order.combo as Combo]})` : ""}
+                </span>
+                <span>− {brl(order.discountCents)}</span>
+              </p>
+            )}
             <p className="flex justify-between gap-3">
               <span className="text-muted">Frete</span>
               <span>{brl(order.shippingCents)}</span>

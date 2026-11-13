@@ -7,9 +7,11 @@ import { Seal } from "@/components/Seal";
 import { useCart } from "@/lib/cart";
 import { parseDecklist } from "@/lib/decklist";
 import { brl } from "@/lib/format";
-import { calcularTotais, folhas, proximaFaixa } from "@/lib/pricing";
+import { LinhasDeAcessorios } from "@/components/ContaDoPedido";
+import { linhasDe, type Linha } from "@/lib/acessorios";
+import { calcularPedido, folhas, proximaFaixa, type Tabela } from "@/lib/pricing";
 import { facesFisicas } from "@/lib/traducao/tipos";
-import type { Valores } from "@/lib/valores";
+import { Acessorios } from "./Acessorios";
 import { useSituacoes, type Situacao } from "@/lib/traducao/carrinho";
 import { impressaoEscolhida, type CardPrint, type CartItem, type CatalogEntry } from "@/lib/types";
 
@@ -319,9 +321,10 @@ function Tile({ item, sit }: { item: CartItem; sit: Situacao }) {
   );
 }
 
-function Resumo({ emPortugues, semPt, versos, valores }: { emPortugues: number; semPt: number; versos: number; valores: Valores }) {
+function Resumo({ emPortugues, semPt, versos, tabela, linhas }: { emPortugues: number; semPt: number; versos: number; tabela: Tabela; linhas: Linha[] }) {
   const { quantidade } = useCart();
-  const totais = calcularTotais(valores, quantidade, "retirada");
+  const { valores } = tabela;
+  const totais = calcularPedido(tabela, quantidade, "retirada", linhas);
   const proxima = proximaFaixa(valores, quantidade);
 
   return (
@@ -355,23 +358,32 @@ function Resumo({ emPortugues, semPt, versos, valores }: { emPortugues: number; 
           </p>
         )}
       </div>
-      <div className="flex flex-col gap-2.5 border-t border-paper-line pt-4">
+      <dl className="flex flex-col gap-2.5 border-t border-paper-line pt-4">
+        {linhas.length > 0 && (
+          <div className="flex justify-between gap-3">
+            <dt>Cartas</dt>
+            <dd className="font-bold">{brl(totais.subtotal)}</dd>
+          </div>
+        )}
+        <LinhasDeAcessorios linhas={linhas} totais={totais} />
         <div className="flex justify-between gap-3">
-          <span>Subtotal</span>
-          <span className="font-bold">{brl(totais.subtotal)}</span>
+          <dt>Subtotal</dt>
+          <dd className="font-bold">{brl(totais.total)}</dd>
         </div>
         <div className="flex justify-between gap-3">
-          <span>Frete</span>
-          <span className="text-paper-muted">no fechamento</span>
+          <dt>Frete</dt>
+          <dd className="text-paper-muted">no fechamento</dd>
         </div>
-      </div>
+      </dl>
       {quantidade > 0 ? (
         <Link href="/fechar" className="btn btn-dark min-h-14 text-[17px]">
           Fechar pedido
         </Link>
       ) : (
         <p className="rounded-[10px] border border-paper-line p-3 text-sm text-paper-muted">
-          Busque uma carta ou cole sua lista para começar.
+          {linhas.length > 0
+            ? "Os acessórios vão junto com um pedido de cartas. Busque uma carta ou cole sua lista para fechar."
+            : "Busque uma carta ou cole sua lista para começar."}
         </p>
       )}
       {semPt > 0 && (
@@ -389,8 +401,9 @@ function Resumo({ emPortugues, semPt, versos, valores }: { emPortugues: number; 
   );
 }
 
-export function Montador({ valores }: { valores: Valores }) {
-  const { itens, pronto, quantidade, tudoEmPortugues, limpar } = useCart();
+export function Montador({ tabela }: { tabela: Tabela }) {
+  const { itens, pronto, quantidade, acessorios, tudoEmPortugues, limpar } = useCart();
+  const linhas = linhasDe(acessorios, tabela.produtos);
   const { situacao, emPortugues } = useSituacoes(itens);
   const semPt = itens.filter((i) => situacao(i).modo === "indisponivel" && !situacao(i).carregando).length;
   // o verso das cartas de duas faces ocupa uma vaga na folha, mas não entra na conta de cartas pedidas
@@ -404,7 +417,8 @@ export function Montador({ valores }: { valores: Valores }) {
       </div>
 
       <div className="flex flex-wrap items-start gap-7">
-        <section aria-label="Cartas do pedido" className="flex min-w-0 flex-[999_1_560px] flex-col gap-4">
+        <div className="flex min-w-0 flex-[999_1_560px] flex-col gap-10">
+        <section aria-label="Cartas do pedido" className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3.5">
             <h2 className="font-display text-[28px] font-bold uppercase tracking-wide">
               Cartas do pedido <span className="text-muted">{pronto ? quantidade : ""}</span>
@@ -435,7 +449,9 @@ export function Montador({ valores }: { valores: Valores }) {
             ))}
           </div>
         </section>
-        <Resumo emPortugues={emPortugues} semPt={semPt} versos={versos} valores={valores} />
+        <Acessorios tabela={tabela} linhas={linhas} />
+        </div>
+        <Resumo emPortugues={emPortugues} semPt={semPt} versos={versos} tabela={tabela} linhas={linhas} />
       </div>
     </>
   );

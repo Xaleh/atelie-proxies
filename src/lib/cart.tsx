@@ -2,15 +2,21 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { loja } from "@/config/loja";
+import { LIMITES_DE_ACESSORIOS, type Escolha } from "./acessorios";
 import type { CardPrint, CartItem, CatalogEntry, Lang } from "./types";
 
 const CHAVE = "proxy-do-reis:carrinho:v1";
+const CHAVE_ACESSORIOS = "proxy-do-reis:acessorios:v1";
 
 type Carrinho = {
   itens: CartItem[];
   /** Falso até o carrinho salvo no navegador ser lido. */
   pronto: boolean;
   quantidade: number;
+  /** Sleeves e deckbox escolhidos, pelo id do produto no catálogo. */
+  acessorios: Escolha[];
+  /** Define quantas unidades de um acessório vão no pedido; zero tira. */
+  mudarAcessorio: (id: number, qty: number) => void;
   adicionar: (entradas: Array<{ entry: CatalogEntry; qty: number }>, idioma: Lang) => void;
   mudarQuantidade: (oracleId: string, qty: number) => void;
   mudarIdioma: (oracleId: string, lang: Lang) => void;
@@ -28,6 +34,7 @@ function limitar(qty: number): number {
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [itens, setItens] = useState<CartItem[]>([]);
+  const [acessorios, setAcessorios] = useState<Escolha[]>([]);
   const [pronto, setPronto] = useState(false);
 
   useEffect(() => {
@@ -37,6 +44,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       const lidos = salvo ? (JSON.parse(salvo) as Array<Omit<CartItem, "arte"> & { arte?: CartItem["arte"] }>) : [];
       // eslint-disable-next-line react-hooks/set-state-in-effect -- leitura única do navegador ao montar
       if (lidos.length) setItens(lidos.map((i) => ({ ...i, arte: i.arte ?? "padrao" })));
+      const extras = JSON.parse(window.localStorage.getItem(CHAVE_ACESSORIOS) ?? "[]") as unknown;
+      if (Array.isArray(extras)) {
+        const validos = extras.filter((e): e is Escolha => Number.isInteger(e?.id) && Number.isInteger(e?.qty) && e.qty > 0);
+        if (validos.length) setAcessorios(validos);
+      }
     } catch {
       // Carrinho ilegível ou armazenamento bloqueado: começa vazio.
     }
@@ -47,10 +59,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (!pronto) return;
     try {
       window.localStorage.setItem(CHAVE, JSON.stringify(itens));
+      window.localStorage.setItem(CHAVE_ACESSORIOS, JSON.stringify(acessorios));
     } catch {
       // Sem armazenamento, o carrinho vale só enquanto a aba estiver aberta.
     }
-  }, [itens, pronto]);
+  }, [itens, acessorios, pronto]);
 
   const adicionar = useCallback<Carrinho["adicionar"]>((entradas, idioma) => {
     setItens((atual) => {
@@ -83,6 +96,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       itens,
       pronto,
       quantidade,
+      acessorios,
+      mudarAcessorio: (id, qty) => {
+        const n = Math.max(0, Math.min(LIMITES_DE_ACESSORIOS.porProduto, Math.round(qty) || 0));
+        setAcessorios((atual) => {
+          const resto = atual.filter((e) => e.id !== id);
+          if (n === 0) return resto;
+          // mantém a posição de quem já estava na lista
+          return atual.some((e) => e.id === id) ? atual.map((e) => (e.id === id ? { id, qty: n } : e)) : [...resto, { id, qty: n }];
+        });
+      },
       adicionar,
       mudarQuantidade: (id, qty) => alterar(id, (x) => ({ ...x, qty: limitar(qty) })),
       // Voltar para o inglês com a impressão em português escolhida volta para a arte em inglês.
@@ -95,9 +118,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         ),
       remover: (id) => setItens((atual) => atual.filter((x) => x.oracleId !== id)),
       tudoEmPortugues: () => setItens((atual) => atual.map((x) => ({ ...x, lang: "pt" }))),
-      limpar: () => setItens([]),
+      limpar: () => {
+        setItens([]);
+        setAcessorios([]);
+      },
     };
-  }, [itens, pronto, adicionar, alterar]);
+  }, [itens, acessorios, pronto, adicionar, alterar]);
 
   return <Ctx.Provider value={valor}>{children}</Ctx.Provider>;
 }

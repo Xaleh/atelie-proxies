@@ -4,6 +4,7 @@ import QRCode from "qrcode";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
 import type { Status } from "@/lib/db/schema";
+import { ROTULO_DO_COMBO, type Combo } from "@/lib/acessorios";
 import { brl } from "@/lib/format";
 import { mercadoPagoConfigurado } from "@/lib/mercadopago";
 import { conciliarPagamentoMP, pedidoPorToken } from "@/lib/orders";
@@ -45,7 +46,8 @@ export default async function PedidoPage({
     }
   }
 
-  const { order, items } = pedido;
+  const { order, items, accessories } = pedido;
+  const unidades = accessories.reduce((n, a) => n + a.quantity, 0);
   const cancelado = order.status === "cancelado";
   const etapaAtual = ETAPAS.findIndex((e) => e.status === order.status);
   const aguardando = order.status === "recebido";
@@ -76,7 +78,8 @@ export default async function PedidoPage({
             Pedido <span className="text-gold">{order.code}</span>
           </h1>
           <p className="text-muted">
-            {order.quantity} {order.quantity === 1 ? "carta" : "cartas"} · {emPortugues} em português · {brl(order.totalCents)}
+            {order.quantity} {order.quantity === 1 ? "carta" : "cartas"} · {emPortugues} em português
+            {accessories.length > 0 ? ` · ${unidades} ${unidades === 1 ? "acessório" : "acessórios"}` : ""} · {brl(order.totalCents)}
           </p>
         </div>
 
@@ -194,6 +197,43 @@ export default async function PedidoPage({
             ))}
           </ul>
         </section>
+
+        {(accessories.length > 0 || order.discountCents > 0) && (
+          <section className="flex flex-col gap-4">
+            <h2 className="font-display text-[28px] font-bold uppercase tracking-wide">Acessórios e valores</h2>
+            <dl className="panel flex max-w-[560px] flex-col gap-2.5 p-5">
+              <div className="flex justify-between gap-3">
+                <dt>
+                  {order.quantity} {order.quantity === 1 ? "carta" : "cartas"} × {brl(order.unitCents)}
+                </dt>
+                <dd className="font-bold">{brl(order.subtotalCents)}</dd>
+              </div>
+              {accessories.map((a) => (
+                <div key={a.id} className="flex justify-between gap-3">
+                  <dt className="min-w-0">
+                    {a.quantity} × {a.name}
+                    {a.description && <span className="block text-[13px] text-muted">{a.description}</span>}
+                  </dt>
+                  <dd className="font-bold">{brl(a.unitCents * a.quantity)}</dd>
+                </div>
+              ))}
+              {order.discountCents > 0 && (
+                <div className="flex justify-between gap-3 text-gold-soft">
+                  <dt>Desconto do combo{order.combo && order.combo in ROTULO_DO_COMBO ? ` (${ROTULO_DO_COMBO[order.combo as Combo]})` : ""}</dt>
+                  <dd className="font-bold">− {brl(order.discountCents)}</dd>
+                </div>
+              )}
+              <div className="flex justify-between gap-3">
+                <dt>Frete</dt>
+                <dd className="font-bold">{order.shippingCents ? brl(order.shippingCents) : "sem frete"}</dd>
+              </div>
+              <div className="flex justify-between gap-3 border-t border-line pt-3 text-xl font-bold">
+                <dt>Total</dt>
+                <dd>{brl(order.totalCents)}</dd>
+              </div>
+            </dl>
+          </section>
+        )}
       </main>
       <Footer />
     </>

@@ -25,19 +25,6 @@ export async function valoresDaLoja(): Promise<ValoresSalvos> {
   return { valores: VALORES_PADRAO, salvoEm: null };
 }
 
-/**
- * Para as páginas da loja: se o banco não responder, mostra os valores do
- * arquivo em vez de derrubar a página. O total é conferido de novo ao fechar.
- */
-export async function valoresParaMostrar(): Promise<Valores> {
-  try {
-    return (await valoresDaLoja()).valores;
-  } catch (err) {
-    console.error("[valores]", err);
-    return VALORES_PADRAO;
-  }
-}
-
 export async function salvarValores(valores: Valores): Promise<void> {
   const value = JSON.stringify(valoresSchema.parse(valores));
   const agora = new Date().toISOString().replace("T", " ").slice(0, 19);
