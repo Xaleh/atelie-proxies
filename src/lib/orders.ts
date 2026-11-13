@@ -7,6 +7,7 @@ import { novoCodigoDePedido, novoToken } from "./ids";
 import { consultarPagamento } from "./mercadopago";
 import { calcularTotais } from "./pricing";
 import { HOSTS_DE_IMAGEM } from "./scryfall";
+import type { Valores } from "./valores";
 
 const { orders, orderItems, payments } = schema;
 
@@ -48,6 +49,8 @@ export const pedidoSchema = z
     cep: texto(12).optional().default(""),
     endereco: texto(300).optional().default(""),
     observacoes: texto(1000).optional().default(""),
+    /** Total que a cliente viu na tela, em centavos, para conferir com o preço em vigor. */
+    totalEsperado: z.number().int().min(0).optional(),
     /** Campo-isca: gente não preenche, robô costuma preencher. */
     site: z.string().max(0).optional().default(""),
     itens: z.array(itemSchema).min(1, "O pedido está vazio").max(300),
@@ -57,18 +60,34 @@ export const pedidoSchema = z
       if (!/^\d{5}-?\d{3}$/.test(p.cep)) ctx.addIssue({ code: "custom", path: ["cep"], message: "Informe um CEP válido" });
       if (p.endereco.length < 8) ctx.addIssue({ code: "custom", path: ["endereco"], message: "Informe o endereço completo" });
     }
-    const total = p.itens.reduce((n, i) => n + i.qty, 0);
-    if (total > loja.maxCartasPorPedido) {
-      ctx.addIssue({ code: "custom", path: ["itens"], message: `O limite é de ${loja.maxCartasPorPedido} cartas por pedido` });
-    }
   });
 
 export type PedidoInput = z.infer<typeof pedidoSchema>;
 
-/** Cria o pedido. O preço é sempre recalculado aqui, nunca vem do navegador. */
-export async function criarPedido(input: PedidoInput): Promise<Order> {
+/** O pedido não pode ser fechado como veio: passou do limite de cartas ou o preço mudou. */
+export class PedidoRecusado extends Error {
+  constructor(
+    public motivo: "limite" | "preco",
+    mensagem: string,
+  ) {
+    super(mensagem);
+  }
+}
+
+/**
+ * Cria o pedido. O preço é sempre recalculado aqui, com os valores em vigor,
+ * e nunca vem do navegador. Se a cliente viu outro total (os valores mudaram
+ * enquanto ela montava o pedido), o pedido é recusado para ela conferir.
+ */
+export async function criarPedido(input: PedidoInput, valores: Valores): Promise<Order> {
   const quantidade = input.itens.reduce((n, i) => n + i.qty, 0);
-  const totais = calcularTotais(quantidade, input.entrega);
+  if (quantidade > valores.maxCartasPorPedido) {
+    throw new PedidoRecusado("limite", `O limite é de ${valores.maxCartasPorPedido} cartas por pedido`);
+  }
+  const totais = calcularTotais(valores, quantidade, input.entrega);
+  if (input.totalEsperado != null && input.totalEsperado !== totais.total) {
+    throw new PedidoRecusado("preco", "Os valores foram atualizados enquanto você montava o pedido. Confira o novo total e confirme de novo.");
+  }
 
   for (let tentativa = 0; tentativa < 5; tentativa++) {
     const code = novoCodigoDePedido();

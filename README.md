@@ -14,7 +14,8 @@ painel em `/admin`.
 - **Pagamento:** Pix copia-e-cola com QR (confirmado à mão no painel) e
   Mercado Pago pelo Checkout Pro (confirmado sozinho pelo webhook).
 - **Painel:** login por senha, lista de pedidos, detalhe com as cartas e a
-  mudança de status com código de rastreio.
+  mudança de status com código de rastreio. Em **Valores**, o preço por carta,
+  o frete e o limite de cartas por pedido.
 - **Produção:** em `/admin/producao`, um ou vários pedidos viram folhas A4 em
   paisagem com 8 cartas. Dá para reordenar, duplicar, tirar e completar as
   vagas com cartas avulsas, e baixar o PDF de impressão e o gabarito de corte
@@ -87,7 +88,15 @@ mudanças antes de enviar para a `main`.
 
 ## Preços e frete
 
-Ficam em `src/config/loja.ts`. Os valores atuais são provisórios.
+O ateliê define em `/admin/valores`: preço por carta por faixa de quantidade,
+frete do envio e limite de cartas por pedido. O que for salvo fica no banco e
+vale para os próximos pedidos na hora; pedidos já feitos guardam o valor de
+quando foram fechados. Enquanto ninguém salvar nada, valem os valores iniciais
+de `src/config/loja.ts`.
+
+Se os valores mudarem enquanto uma cliente está com a página de fechamento
+aberta, o site recusa a confirmação, mostra o total novo e pede para ela
+confirmar de novo.
 
 ## Como o código está organizado
 
