@@ -5,7 +5,7 @@ import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { aceitaMoldeAutomatico, chaveDoSabor, moldeParaUsar, moldeSchema, type MetaDeImpressao } from "@/lib/traducao/tipos";
+import { aceitaMoldeAutomatico, chaveDoSabor, facesFisicas, moldeParaUsar, moldeSchema, type MetaDeImpressao } from "@/lib/traducao/tipos";
 import { impressaoEscolhida, modoDoTexto, type CardPrint } from "@/lib/types";
 
 const dir = mkdtempSync(join(tmpdir(), "pdr-tr-"));
@@ -46,6 +46,10 @@ describe("molde", () => {
   it("só aceita o automático na moldura 2015 comum", () => {
     expect(aceitaMoldeAutomatico(meta())).toBe(true);
     expect(aceitaMoldeAutomatico(meta({ frame: "1997" }))).toBe(false);
+    // moldura antiga (Alpha a Mirage, 30th Edition): só no layout comum
+    expect(aceitaMoldeAutomatico(meta({ frame: "1993" }))).toBe(true);
+    expect(aceitaMoldeAutomatico(meta({ frame: "1993", layout: "transform" }))).toBe(false);
+    expect(aceitaMoldeAutomatico(meta({ frame: "1993", tipo: "Enchantment — Saga" }))).toBe(false);
     expect(aceitaMoldeAutomatico(meta({ layout: "split" }))).toBe(false);
     expect(aceitaMoldeAutomatico(meta({ tipo: "Legendary Planeswalker — Jace" }))).toBe(false);
     expect(aceitaMoldeAutomatico(meta({ tipo: "Enchantment — Saga" }))).toBe(false);
@@ -65,6 +69,17 @@ describe("molde", () => {
     expect(moldeParaUsar(meta(), { modo: "bloqueado" })).toBeNull();
     expect(moldeParaUsar(meta(), null)).toBe("auto");
     expect(moldeParaUsar(meta({ frame: "1997" }), null)).toBeNull();
+  });
+
+  it("conta o verso das cartas de duas faces como carta física", () => {
+    const duas = [meta().faces[0], meta().faces[0]];
+    expect(facesFisicas(meta())).toBe(1);
+    expect(facesFisicas(meta({ layout: "transform", faces: duas }))).toBe(2);
+    expect(facesFisicas(meta({ layout: "modal_dfc", faces: duas }))).toBe(2);
+    // split e aventura têm duas "faces" de texto numa carta só
+    expect(facesFisicas(meta({ layout: "split", faces: duas }))).toBe(1);
+    expect(facesFisicas(meta({ layout: "adventure", faces: duas }))).toBe(1);
+    expect(facesFisicas(undefined)).toBe(1);
   });
 
   it("recusa retângulo fora da carta", () => {

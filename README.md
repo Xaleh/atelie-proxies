@@ -18,18 +18,25 @@ painel em `/admin`.
 - **Produção:** em `/admin/producao`, um ou vários pedidos viram folhas A4 em
   paisagem com 8 cartas. Dá para reordenar, duplicar, tirar e completar as
   vagas com cartas avulsas, e baixar o PDF de impressão e o gabarito de corte
-  em DXF. A geometria e as marcas de registro são as mesmas do site de
+  em DXF. O verso das cartas de duas faces é sempre impresso, como uma carta a
+  mais, e anda junto com a frente ao mover, duplicar ou tirar. A geometria e as marcas de registro são as mesmas do site de
   produção anterior, então o gabarito da Silhouette Portrait 4 continua valendo.
 - **Texto em português sobre a arte em inglês:** quando a cliente escolhe PT
   numa arte que só existe em inglês, o site escreve nome, tipo e texto em
   português por cima da arte (selo "PT traduzida"), com prévia na loja e no PDF.
   O texto vem, nesta ordem, da revisão feita no painel, do MTG Arena e da carta
-  impressa em português. As fontes são livres (Crimson Pro e Inter).
+  impressa em português. As fontes são livres (Crimson Pro e Inter). O site
+  apaga só as letras em inglês, sem cobrir a caixa, e usa os símbolos de mana
+  oficiais que o Scryfall publica (`svgs.scryfall.io`); sem acesso a eles, cai
+  num desenho simples.
 - **Traduções no painel:** em `/admin/traducoes`, importar o
   `traducoes-arena.json` do agente do Arena (a importação substitui a anterior)
   e revisar o texto de qualquer carta.
-- **Moldes:** artes com a moldura padrão (2015) recebem o texto sozinhas. Para
-  as outras (sem borda, vitrine, arte estendida), em `/admin/moldes/<id>` o
+- **Moldes:** artes com a moldura moderna (2015) ou a antiga (1993, de Alpha a
+  Mirage) recebem o texto sozinhas. Na moldura antiga o resultado depende do
+  scan: cartas brancas e as de Alpha e Beta podem sair com o nome fora do
+  lugar, e aí vale o molde manual. Para essas e para as outras artes (sem
+  borda, vitrine, arte estendida), em `/admin/moldes/<id>` o
   Augusto marca onde ficam nome, tipo e texto, ou desliga o português naquela
   arte. Na produção, o botão "Molde" de cada carta abre essa tela.
 

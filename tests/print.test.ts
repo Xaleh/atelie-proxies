@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { gerarDxf } from "@/lib/print/dxf";
 import { AJUSTES_PADRAO, MARCA, avisosDoLayout, computeLayout, folhasPara } from "@/lib/print/layout";
 import {
-  ajustarVersos,
+  completarVersos,
+  duplicarGrupo,
+  grupoDe,
+  moverUmaPosicao,
+  tirarGrupo,
   montarSlots,
   moverSlot,
   pngDaImagemNormal,
@@ -107,7 +111,7 @@ describe("lote de produção", () => {
   ]);
 
   it("abre uma posição por cópia e por face, na ordem dos pedidos", () => {
-    const slots = montarSlots(pedidos, detalhes, true);
+    const slots = montarSlots(pedidos, detalhes);
     expect(slots.map((s) => `${s.nome}|${s.face}|${s.origem}`)).toEqual([
       "Anel Solar|0|PX-AAAA",
       "Anel Solar|0|PX-AAAA",
@@ -121,24 +125,51 @@ describe("lote de produção", () => {
   });
 
   it("sem os detalhes do Scryfall usa a frente gravada no pedido", () => {
-    const slot = montarSlots(pedidos, detalhes, true).at(-1)!;
+    const slot = montarSlots(pedidos, detalhes).at(-1)!;
     expect(slot.thumb).toBe(normal("sem-detalhe"));
     expect(slot.png).toBe(png("sem-detalhe"));
     expect(pngDaImagemNormal("https://cards.scryfall.io/normal/front/1/2/x.jpg")).toBe("https://cards.scryfall.io/png/front/1/2/x.png");
   });
 
-  it("liga e desliga os versos sem perder a ordem do lote", () => {
-    const sem = montarSlots(pedidos, detalhes, false);
-    expect(sem).toHaveLength(4);
-    const reordenado = moverSlot(sem, 2, 0); // a carta de duas faces vai para o começo
-    const com = ajustarVersos(reordenado, detalhes, true);
-    expect(com.map((s) => s.nome)).toEqual(["Delver of Secrets", "Insectile Aberration", "Anel Solar", "Anel Solar", "Counterspell"]);
-    expect(ajustarVersos(com, detalhes, true)).toHaveLength(5); // não duplica o verso
-    expect(ajustarVersos(com, detalhes, false).map((s) => s.nome)).toEqual(["Delver of Secrets", "Anel Solar", "Anel Solar", "Counterspell"]);
+  it("lote guardado sem o verso ganha o verso logo depois da frente, uma vez só", () => {
+    const antigo = montarSlots(pedidos, detalhes).filter((s) => s.face === 0);
+    expect(antigo).toHaveLength(4);
+    const completo = completarVersos(antigo, detalhes);
+    expect(completo.map((s) => s.nome)).toEqual(["Anel Solar", "Anel Solar", "Delver of Secrets", "Insectile Aberration", "Counterspell"]);
+    expect(completarVersos(completo, detalhes)).toBe(completo);
+  });
+
+  const nomes = (slots: ReturnType<typeof montarSlots>) => slots.map((s) => `${s.nome.split(" ")[0]}${s.grupo}`).join(" ");
+
+  it("frente e verso andam juntos ao mover", () => {
+    const slots = montarSlots(pedidos, detalhes); // Anel1 Anel2 Delver3 Insectile3 Counterspell4
+    expect(grupoDe(slots, 3)).toEqual([2, 3]);
+    // arrastar o verso para o começo leva a frente junto
+    expect(nomes(moverSlot(slots, 3, 0))).toBe("Delver3 Insectile3 Anel1 Anel2 Counterspell4");
+    // soltar uma carta em cima do verso de outra: cai depois do par, nunca no meio
+    expect(nomes(moverSlot(slots, 0, 2))).toBe("Anel2 Delver3 Insectile3 Anel1 Counterspell4");
+    expect(nomes(moverSlot(slots, 4, 3))).toBe("Anel1 Anel2 Counterspell4 Delver3 Insectile3");
+    // soltar em cima do próprio par não muda nada
+    expect(moverSlot(slots, 2, 3)).toBe(slots);
+    // setas: uma carta de cada vez, pulando o par inteiro
+    expect(nomes(moverUmaPosicao(slots, 1, 1))).toBe("Anel1 Delver3 Insectile3 Anel2 Counterspell4");
+    expect(nomes(moverUmaPosicao(slots, 2, 1))).toBe("Anel1 Anel2 Counterspell4 Delver3 Insectile3");
+    expect(nomes(moverUmaPosicao(slots, 3, -1))).toBe("Anel1 Delver3 Insectile3 Anel2 Counterspell4");
+    expect(moverUmaPosicao(slots, 0, -1)).toBe(slots);
+    expect(moverUmaPosicao(slots, 4, 1)).toBe(slots);
+  });
+
+  it("duplicar e tirar valem para o par", () => {
+    const slots = montarSlots(pedidos, detalhes);
+    const mais = duplicarGrupo(slots, 3);
+    expect(nomes(mais)).toBe("Anel1 Anel2 Delver3 Insectile3 Delver5 Insectile5 Counterspell4");
+    expect(new Set(mais.map((s) => s.uid)).size).toBe(mais.length);
+    expect(nomes(tirarGrupo(slots, 2))).toBe("Anel1 Anel2 Counterspell4");
+    expect(nomes(tirarGrupo(slots, 0))).toBe("Anel2 Delver3 Insectile3 Counterspell4");
   });
 
   it("move posições dentro dos limites", () => {
-    const slots = montarSlots(pedidos, detalhes, false);
+    const slots = montarSlots(pedidos, detalhes);
     expect(moverSlot(slots, 0, 99).at(-1)!.nome).toBe("Anel Solar");
     expect(moverSlot(slots, 5, 0)).toBe(slots);
     expect(moverSlot(slots, 1, 1)).toBe(slots);

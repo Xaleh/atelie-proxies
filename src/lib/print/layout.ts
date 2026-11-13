@@ -39,8 +39,6 @@ export type Ajustes = {
   dpi: number;
   /** Qualidade do JPEG, de 0 a 1. */
   qual: number;
-  /** Imprime também o verso das cartas de duas faces, como carta separada. */
-  versos: boolean;
 };
 
 export const AJUSTES_PADRAO: Ajustes = {
@@ -52,7 +50,6 @@ export const AJUSTES_PADRAO: Ajustes = {
   crop: false,
   dpi: 1200,
   qual: 0.92,
-  versos: true,
 };
 
 export type Retangulo = { x: number; y: number; w: number; h: number };

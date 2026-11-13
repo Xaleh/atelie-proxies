@@ -20,7 +20,7 @@ const PADRAO: MoldeManual = {
   nome: { x: 0.072, y: 0.053, w: 0.86, h: 0.046 },
   tipo: { x: 0.072, y: 0.567, w: 0.784, h: 0.046 },
   texto: { x: 0.07, y: 0.629, w: 0.851, h: 0.295 },
-  fundo: "cor",
+  fundo: "limpar",
   corTexto: "auto",
 };
 
@@ -98,7 +98,7 @@ export function EditorDeMolde({ detalhe, face, inicial }: { detalhe: DetalheDeIm
           <legend className="sr-only">Como esta arte recebe o texto em português</legend>
           {(
             [
-              ["auto", "Automático", automaticoServe ? "Usa a moldura padrão." : "Esta moldura não é a padrão: sem molde, a arte não recebe tradução."],
+              ["auto", "Automático", automaticoServe ? "Usa o molde da moldura desta carta." : "O molde automático não cobre esta moldura: sem molde manual, a arte não recebe tradução."],
               ["manual", "Molde manual", "Você marca os retângulos abaixo."],
               ["bloqueado", "Não traduzir esta arte", "A arte sai sempre em inglês; a loja não oferece PT nela."],
             ] as const
@@ -211,6 +211,7 @@ export function EditorDeMolde({ detalhe, face, inicial }: { detalhe: DetalheDeIm
                   Fundo do texto
                 </label>
                 <select id="fundo" className="field min-h-11" value={manual.fundo} onChange={(e) => setManual((m) => ({ ...m, fundo: e.target.value as MoldeManual["fundo"] }))}>
+                  <option value="limpar">Apagar só as letras</option>
                   <option value="cor">Cor da própria caixa</option>
                   <option value="desfoque">Arte desfocada e escurecida</option>
                 </select>
