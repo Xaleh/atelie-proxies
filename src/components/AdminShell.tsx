@@ -23,6 +23,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             <Link href="/admin/traducoes" className="py-3 hover:text-gold-soft">
               Traduções
             </Link>
+            <Link href="/admin/acessorios" className="py-3 hover:text-gold-soft">
+              Acessórios
+            </Link>
             <Link href="/admin/valores" className="py-3 hover:text-gold-soft">
               Valores
             </Link>

@@ -17,7 +17,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ to
   try {
     const url = await criarPreferencia({
       codigo: pedido.order.code,
-      titulo: `${loja.nome} · pedido ${pedido.order.code} · ${pedido.order.quantity} cartas`,
+      titulo: `${loja.nome} · pedido ${pedido.order.code} · ${pedido.order.quantity} cartas${pedido.accessories.length ? " e acessórios" : ""}`,
       centavos: pedido.order.totalCents,
       siteUrl: siteUrl(),
       retorno: `/pedido/${pedido.order.token}`,

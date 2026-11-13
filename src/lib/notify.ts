@@ -5,7 +5,7 @@ import { siteUrl } from "./site";
  * painel, sem dados da cliente. Sem TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID
  * configurados, não faz nada.
  */
-export async function avisarPedidoNovo(code: string, quantidade: number): Promise<void> {
+export async function avisarPedidoNovo(code: string, quantidade: number, comAcessorios = false): Promise<void> {
   const bot = process.env.TELEGRAM_BOT_TOKEN;
   const chat = process.env.TELEGRAM_CHAT_ID;
   if (!bot || !chat) return;
@@ -15,7 +15,7 @@ export async function avisarPedidoNovo(code: string, quantidade: number): Promis
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id: chat,
-        text: `Pedido novo ${code}: ${quantidade} cartas\n${siteUrl()}/admin/pedidos/${code}`,
+        text: `Pedido novo ${code}: ${quantidade} cartas${comAcessorios ? " + acessórios" : ""}\n${siteUrl()}/admin/pedidos/${code}`,
       }),
       signal: AbortSignal.timeout(4000),
       cache: "no-store",

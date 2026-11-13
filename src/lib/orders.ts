@@ -2,14 +2,14 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { loja } from "@/config/loja";
 import { db, schema } from "./db";
-import type { Order, OrderItem, Payment, Status } from "./db/schema";
+import type { Order, OrderAccessory, OrderItem, Payment, Status } from "./db/schema";
 import { novoCodigoDePedido, novoToken } from "./ids";
 import { consultarPagamento } from "./mercadopago";
-import { calcularTotais } from "./pricing";
+import { LIMITES_DE_ACESSORIOS, linhasDe } from "./acessorios";
+import { calcularPedido, type Tabela } from "./pricing";
 import { HOSTS_DE_IMAGEM } from "./scryfall";
-import type { Valores } from "./valores";
 
-const { orders, orderItems, payments } = schema;
+const { orders, orderItems, orderAccessories, payments } = schema;
 
 const texto = (max: number) => z.string().trim().max(max);
 
@@ -54,6 +54,13 @@ export const pedidoSchema = z
     /** Campo-isca: gente não preenche, robô costuma preencher. */
     site: z.string().max(0).optional().default(""),
     itens: z.array(itemSchema).min(1, "O pedido está vazio").max(300),
+    /** Sleeves e deckbox escolhidos: o produto do catálogo e quantas unidades. */
+    acessorios: z
+      .array(z.object({ id: z.number().int().positive(), qty: z.number().int().min(1).max(LIMITES_DE_ACESSORIOS.porProduto) }))
+      .max(LIMITES_DE_ACESSORIOS.produtos)
+      .optional()
+      .default([])
+      .refine((lista) => new Set(lista.map((a) => a.id)).size === lista.length, "acessório repetido"),
   })
   .superRefine((p, ctx) => {
     if (p.entrega === "envio") {
@@ -67,7 +74,7 @@ export type PedidoInput = z.infer<typeof pedidoSchema>;
 /** O pedido não pode ser fechado como veio: passou do limite de cartas ou o preço mudou. */
 export class PedidoRecusado extends Error {
   constructor(
-    public motivo: "limite" | "preco",
+    public motivo: "limite" | "preco" | "acessorio",
     mensagem: string,
   ) {
     super(mensagem);
@@ -79,12 +86,18 @@ export class PedidoRecusado extends Error {
  * e nunca vem do navegador. Se a cliente viu outro total (os valores mudaram
  * enquanto ela montava o pedido), o pedido é recusado para ela conferir.
  */
-export async function criarPedido(input: PedidoInput, valores: Valores): Promise<Order> {
+export async function criarPedido(input: PedidoInput, tabela: Tabela): Promise<Order> {
+  const { valores } = tabela;
   const quantidade = input.itens.reduce((n, i) => n + i.qty, 0);
   if (quantidade > valores.maxCartasPorPedido) {
     throw new PedidoRecusado("limite", `O limite é de ${valores.maxCartasPorPedido} cartas por pedido`);
   }
-  const totais = calcularTotais(valores, quantidade, input.entrega);
+  // Acessório que saiu da loja enquanto a cliente montava o pedido não entra calado nem some calado.
+  const linhas = linhasDe(input.acessorios, tabela.produtos);
+  if (linhas.length !== input.acessorios.length) {
+    throw new PedidoRecusado("acessorio", "Um acessório que você escolheu não está mais disponível. Confira o pedido e confirme de novo.");
+  }
+  const totais = calcularPedido(tabela, quantidade, input.entrega, linhas);
   if (input.totalEsperado != null && input.totalEsperado !== totais.total) {
     throw new PedidoRecusado("preco", "Os valores foram atualizados enquanto você montava o pedido. Confira o novo total e confirme de novo.");
   }
@@ -109,6 +122,9 @@ export async function criarPedido(input: PedidoInput, valores: Valores): Promise
             subtotalCents: totais.subtotal,
             shippingCents: totais.frete,
             totalCents: totais.total,
+            accessoriesCents: totais.acessorios,
+            discountCents: totais.desconto,
+            combo: totais.combo,
           })
           .returning();
         await tx.insert(orderItems).values(
@@ -126,6 +142,19 @@ export async function criarPedido(input: PedidoInput, valores: Valores): Promise
             quantity: i.qty,
           })),
         );
+        if (linhas.length) {
+          await tx.insert(orderAccessories).values(
+            linhas.map((l) => ({
+              orderId: order.id,
+              productId: l.produto.id,
+              kind: l.produto.tipo,
+              name: l.produto.nome,
+              description: l.produto.descricao,
+              unitCents: l.produto.centavos,
+              quantity: l.qty,
+            })),
+          );
+        }
         return order;
       });
     } catch (err) {
@@ -137,15 +166,16 @@ export async function criarPedido(input: PedidoInput, valores: Valores): Promise
   throw new Error("Não foi possível gerar um código de pedido");
 }
 
-export type PedidoCompleto = { order: Order; items: OrderItem[]; payments: Payment[] };
+export type PedidoCompleto = { order: Order; items: OrderItem[]; accessories: OrderAccessory[]; payments: Payment[] };
 
 async function completar(order: Order | undefined): Promise<PedidoCompleto | null> {
   if (!order) return null;
-  const [items, pays] = await Promise.all([
+  const [items, accessories, pays] = await Promise.all([
     db().select().from(orderItems).where(eq(orderItems.orderId, order.id)).orderBy(orderItems.id),
+    db().select().from(orderAccessories).where(eq(orderAccessories.orderId, order.id)).orderBy(orderAccessories.id),
     db().select().from(payments).where(eq(payments.orderId, order.id)).orderBy(payments.id),
   ]);
-  return { order, items, payments: pays };
+  return { order, items, accessories, payments: pays };
 }
 
 export async function pedidoPorToken(token: string): Promise<PedidoCompleto | null> {

@@ -15,7 +15,8 @@ painel em `/admin`.
   Mercado Pago pelo Checkout Pro (confirmado sozinho pelo webhook).
 - **Painel:** login por senha, lista de pedidos, detalhe com as cartas e a
   mudança de status com código de rastreio. Em **Valores**, o preço por carta,
-  o frete e o limite de cartas por pedido.
+  o frete e o limite de cartas por pedido. Em **Acessórios**, o catálogo de
+  sleeves e deckboxes e o desconto dos combos.
 - **Produção:** em `/admin/producao`, um ou vários pedidos viram folhas A4 em
   paisagem com 8 cartas. Dá para reordenar, duplicar, tirar e completar as
   vagas com cartas avulsas, e baixar o PDF de impressão e o gabarito de corte
@@ -94,9 +95,22 @@ vale para os próximos pedidos na hora; pedidos já feitos guardam o valor de
 quando foram fechados. Enquanto ninguém salvar nada, valem os valores iniciais
 de `src/config/loja.ts`.
 
+### Acessórios e combos
+
+Em `/admin/acessorios` o ateliê cadastra sleeves e deckboxes (nome, detalhe,
+preço e se está disponível) e define o desconto de cada combo: cartas +
+sleeves, cartas + deckbox e cartas + sleeves + deckbox. O desconto pode ser
+percentual ou um valor fixo em reais, e incide sobre cartas + acessórios; o
+frete fica de fora. Só aparece na loja o que estiver marcado como disponível;
+sem nenhum item disponível, a seção de acessórios some. Acessório só é vendido
+junto com cartas. Cada item pode ter uma foto: o painel reduz a imagem no
+navegador (JPEG de até 800 px e 400 KB) e ela fica guardada no banco, servida
+por `/api/acessorios/<id>/imagem` com cache longo. O pedido guarda o nome e o preço de cada acessório na hora da
+compra, então mudar ou remover um item do catálogo não altera pedidos feitos.
+
 Se os valores mudarem enquanto uma cliente está com a página de fechamento
-aberta, o site recusa a confirmação, mostra o total novo e pede para ela
-confirmar de novo.
+aberta (preço, frete, desconto ou um acessório que ficou indisponível), o site
+recusa a confirmação, mostra o total novo e pede para ela confirmar de novo.
 
 ## Como o código está organizado
 

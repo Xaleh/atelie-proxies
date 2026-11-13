@@ -65,7 +65,10 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                   </td>
                   <td className="px-4 py-3 font-mono">{order.code}</td>
                   <td className="px-4 py-3">{order.customerName}</td>
-                  <td className="px-4 py-3">{order.quantity}</td>
+                  <td className="px-4 py-3">
+                    {order.quantity}
+                    {order.accessoriesCents > 0 && <span className="ml-2 rounded-full border border-gold px-2 py-0.5 text-xs font-semibold text-gold">+ acessórios</span>}
+                  </td>
                   <td className="px-4 py-3">{emPortugues}</td>
                   <td className="px-4 py-3">{brl(order.totalCents)}</td>
                   <td className="px-4 py-3">

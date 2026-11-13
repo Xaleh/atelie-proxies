@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loja } from "@/config/loja";
-import { calcularTotais, folhas, precoPorCarta, proximaFaixa } from "@/lib/pricing";
+import { COMBOS_PADRAO, comboDoPedido, descontoEmCentavos, descontoPorExtenso, linhasDe, percentualDe, type Combos, type Produto } from "@/lib/acessorios";
+import { calcularPedido, calcularTotais, folhas, precoPorCarta, proximaFaixa } from "@/lib/pricing";
 import { VALORES_PADRAO as V, centavosDe, reaisDe, valoresSchema, type Valores } from "@/lib/valores";
 
 const [f1, f2] = loja.faixasDePreco;
@@ -83,5 +84,58 @@ describe("valores definidos no painel", () => {
     expect(centavosDe("")).toBeNull();
     expect(reaisDe(450)).toBe("4,50");
     expect(reaisDe(2000)).toBe("20,00");
+  });
+});
+
+describe("acessórios e combos", () => {
+  const sleeve: Produto = { id: 1, tipo: "sleeve", nome: "Sleeves", descricao: "", centavos: 3000, disponivel: true, imagem: null };
+  const deckbox: Produto = { id: 2, tipo: "deckbox", nome: "Deckbox", descricao: "", centavos: 4500, disponivel: true, imagem: null };
+  const esgotado: Produto = { id: 3, tipo: "deckbox", nome: "Esgotado", descricao: "", centavos: 100, disponivel: false, imagem: null };
+  const produtos = [sleeve, deckbox, esgotado];
+  const combos: Combos = { sleeves: { tipo: "percentual", valor: 500 }, deckbox: { tipo: "fixo", valor: 300 }, completo: { tipo: "percentual", valor: 1250 } };
+  const tabela = { valores: V, produtos, combos };
+
+  it("junta as escolhas com o catálogo e ignora o que não está disponível", () => {
+    const linhas = linhasDe([{ id: 1, qty: 2 }, { id: 3, qty: 1 }, { id: 77, qty: 1 }, { id: 2, qty: 999 }], produtos);
+    expect(linhas.map((l) => [l.produto.id, l.qty])).toEqual([[1, 2], [2, 20]]);
+  });
+
+  it("identifica o combo pelo que vai no pedido", () => {
+    const s = linhasDe([{ id: 1, qty: 1 }], produtos), d = linhasDe([{ id: 2, qty: 1 }], produtos);
+    expect(comboDoPedido(10, [])).toBeNull();
+    expect(comboDoPedido(10, s)).toBe("sleeves");
+    expect(comboDoPedido(10, d)).toBe("deckbox");
+    expect(comboDoPedido(10, [...s, ...d])).toBe("completo");
+    expect(comboDoPedido(0, [...s, ...d])).toBeNull(); // sem cartas não há combo
+  });
+
+  it("desconta sobre cartas + acessórios e deixa o frete de fora", () => {
+    // 10 cartas × 4,00 = 40,00
+    expect(calcularPedido(tabela, 10, "envio", [])).toMatchObject({ subtotal: 4000, acessorios: 0, combo: null, desconto: 0, frete: 2000, total: 6000 });
+    const s = linhasDe([{ id: 1, qty: 2 }], produtos); // + 60,00 → 5% de 100,00
+    expect(calcularPedido(tabela, 10, "envio", s)).toMatchObject({ acessorios: 6000, combo: "sleeves", desconto: 500, total: 4000 + 6000 - 500 + 2000 });
+    const d = linhasDe([{ id: 2, qty: 1 }], produtos); // + 45,00 → R$ 3,00 fixo
+    expect(calcularPedido(tabela, 10, "retirada", d)).toMatchObject({ combo: "deckbox", desconto: 300, frete: 0, total: 4000 + 4500 - 300 });
+    const tudo = linhasDe([{ id: 1, qty: 1 }, { id: 2, qty: 1 }], produtos); // 115,00 → 12,5% = 14,375 → 14,38
+    expect(calcularPedido(tabela, 10, "retirada", tudo)).toMatchObject({ combo: "completo", desconto: 1438, total: 11500 - 1438 });
+  });
+
+  it("combo sem desconto não aparece, e o desconto fixo nunca passa do valor do pedido", () => {
+    const s = linhasDe([{ id: 1, qty: 1 }], produtos);
+    expect(calcularPedido({ ...tabela, combos: COMBOS_PADRAO }, 10, "retirada", s)).toMatchObject({ combo: null, desconto: 0, total: 7000 });
+    expect(descontoEmCentavos({ tipo: "fixo", valor: 99999 }, 3400)).toBe(3400);
+    expect(descontoEmCentavos({ tipo: "percentual", valor: 10000 }, 3400)).toBe(3400);
+  });
+
+  it("lê e escreve percentuais", () => {
+    expect(percentualDe("10")).toBe(1000);
+    expect(percentualDe("7,5")).toBe(750);
+    expect(percentualDe("12.25%")).toBe(1225);
+    expect(percentualDe("0")).toBe(0);
+    expect(percentualDe("101")).toBeNull();
+    expect(percentualDe("-5")).toBeNull();
+    expect(percentualDe("dez")).toBeNull();
+    expect(descontoPorExtenso({ tipo: "percentual", valor: 750 })).toBe("7,5%");
+    expect(descontoPorExtenso({ tipo: "fixo", valor: 500 }).replace(/\s/g, " ")).toBe("R$ 5,00");
   });
 });
