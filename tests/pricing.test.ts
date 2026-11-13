@@ -88,9 +88,9 @@ describe("valores definidos no painel", () => {
 });
 
 describe("acessórios e combos", () => {
-  const sleeve: Produto = { id: 1, tipo: "sleeve", nome: "Sleeves", descricao: "", centavos: 3000, disponivel: true };
-  const deckbox: Produto = { id: 2, tipo: "deckbox", nome: "Deckbox", descricao: "", centavos: 4500, disponivel: true };
-  const esgotado: Produto = { id: 3, tipo: "deckbox", nome: "Esgotado", descricao: "", centavos: 100, disponivel: false };
+  const sleeve: Produto = { id: 1, tipo: "sleeve", nome: "Sleeves", descricao: "", centavos: 3000, disponivel: true, imagem: null };
+  const deckbox: Produto = { id: 2, tipo: "deckbox", nome: "Deckbox", descricao: "", centavos: 4500, disponivel: true, imagem: null };
+  const esgotado: Produto = { id: 3, tipo: "deckbox", nome: "Esgotado", descricao: "", centavos: 100, disponivel: false, imagem: null };
   const produtos = [sleeve, deckbox, esgotado];
   const combos: Combos = { sleeves: { tipo: "percentual", valor: 500 }, deckbox: { tipo: "fixo", valor: 300 }, completo: { tipo: "percentual", valor: 1250 } };
   const tabela = { valores: V, produtos, combos };

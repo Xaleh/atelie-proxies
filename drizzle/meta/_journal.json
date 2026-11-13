@@ -29,6 +29,13 @@
       "when": 1794586370341,
       "tag": "0003_faithful_tarantula",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794587216684,
+      "tag": "0004_lying_famine",
+      "breakpoints": true
     }
   ]
 }

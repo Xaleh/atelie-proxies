@@ -17,9 +17,12 @@ export function Acessorios({ tabela, linhas }: { tabela: Tabela; linhas: Linha[]
 
   return (
     <section aria-labelledby="titulo-acessorios" className="flex flex-col gap-4">
-      <h2 id="titulo-acessorios" className="font-display text-[28px] font-bold uppercase tracking-wide">
-        Acessórios
-      </h2>
+      <div>
+        <h2 id="titulo-acessorios" className="font-display text-[28px] font-bold uppercase tracking-wide">
+          Acessórios
+        </h2>
+        <p className="text-muted">Para levar junto com as cartas. Não vendemos acessórios separados.</p>
+      </div>
       {possiveis.length > 0 && (
         <ul className="flex flex-wrap gap-2" aria-label="Descontos de combo">
           {possiveis.map((c) => (
@@ -42,7 +45,11 @@ export function Acessorios({ tabela, linhas }: { tabela: Tabela; linhas: Linha[]
               {produtos.map((p) => {
                 const qty = acessorios.find((e) => e.id === p.id)?.qty ?? 0;
                 return (
-                  <li key={p.id} className={`panel flex flex-col gap-3 rounded-[14px] p-4 ${qty ? "border-gold" : ""}`}>
+                  <li key={p.id} className={`panel flex flex-col gap-3 overflow-hidden rounded-[14px] p-4 ${qty ? "border-gold" : ""}`}>
+                    {p.imagem && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={p.imagem} alt={`Foto de ${p.nome}`} loading="lazy" className="-mx-4 -mt-4 mb-1 aspect-[4/3] w-[calc(100%+2rem)] max-w-none bg-ink object-contain" />
+                    )}
                     <div className="min-w-0">
                       <div className="font-bold">{p.nome}</div>
                       {p.descricao && <div className="text-[13px] text-muted">{p.descricao}</div>}

@@ -7,7 +7,7 @@ import { migrate } from "drizzle-orm/libsql/migrator";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { loja } from "@/config/loja";
 import { calcularTotais } from "@/lib/pricing";
-import { COMBOS_PADRAO } from "@/lib/acessorios";
+import { COMBOS_PADRAO, acessoriosParaSalvarSchema } from "@/lib/acessorios";
 import { VALORES_PADRAO } from "@/lib/valores";
 import type { Valores } from "@/lib/valores";
 
@@ -22,7 +22,7 @@ process.env.MERCADOPAGO_ACCESS_TOKEN = "TEST-token";
 const { PedidoRecusado, conciliarPagamentoMP, criarPedido, mudarStatus, pedidoPorCodigo, pedidoPorToken, pedidoSchema, listarPedidos } =
   await import("@/lib/orders");
 const { salvarValores, valoresDaLoja } = await import("@/lib/valores-servidor");
-const { listarProdutos, salvarAcessorios, tabelaDaLoja } = await import("@/lib/acessorios-servidor");
+const { FotoRecusada, fotoDoProduto, listarProdutos, salvarAcessorios, tabelaDaLoja } = await import("@/lib/acessorios-servidor");
 
 const item = (qty: number, lang: "en" | "pt" = "en") => ({
   printId: "11111111-1111-4111-8111-111111111111",
@@ -150,7 +150,7 @@ describe("pedido", () => {
 
     // o painel muda o preço, renomeia e depois apaga: o pedido feito não muda
     const todos = await listarProdutos();
-    await salvarAcessorios({ produtos: [{ ...todos[0], nome: "Sleeves azuis", centavos: 9900 }], combos: tabela.combos });
+    await salvarAcessorios({ produtos: [{ ...todos[0], imagem: { acao: "manter" }, nome: "Sleeves azuis", centavos: 9900 }], combos: tabela.combos });
     const depois = await listarProdutos();
     expect(depois).toHaveLength(1);
     expect(depois[0]).toMatchObject({ id: sleeve.id, nome: "Sleeves azuis", centavos: 9900 }); // mesmo produto, atualizado
@@ -167,6 +167,41 @@ describe("pedido", () => {
     expect(pedidoSchema.safeParse({ ...base, itens: [item(1)], acessorios: [{ id: 1, qty: 1 }, { id: 1, qty: 2 }] }).success).toBe(false);
     expect(pedidoSchema.safeParse({ ...base, itens: [item(1)], acessorios: [{ id: 1, qty: 0 }] }).success).toBe(false);
     expect(pedidoSchema.safeParse({ ...base, itens: [], acessorios: [{ id: 1, qty: 1 }] }).success).toBe(false); // acessório sem carta não fecha
+  });
+
+  it("guarda, troca e tira a foto do acessório, e recusa o que não é JPEG", async () => {
+    const jpeg = (enchimento: number) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, enchimento), Buffer.from([0xff, 0xd9])]);
+    const combos = (await tabelaDaLoja()).combos;
+    const [atual] = await listarProdutos();
+    expect(atual.imagem).toBeNull();
+    const base = { id: atual.id, tipo: atual.tipo, nome: atual.nome, descricao: atual.descricao, centavos: atual.centavos, disponivel: true };
+
+    await salvarAcessorios({ produtos: [{ ...base, imagem: { acao: "nova", dados: jpeg(1).toString("base64") } }], combos });
+    const [comFoto] = await listarProdutos();
+    expect(comFoto.imagem).toMatch(new RegExp(`^/api/acessorios/${atual.id}/imagem\\?v=[0-9a-f]{16}$`));
+    expect((await fotoDoProduto(atual.id))?.data.equals(jpeg(1))).toBe(true);
+
+    // salvar sem mexer na foto mantém a mesma; trocar muda o endereço (para o cache do navegador não segurar a antiga)
+    await salvarAcessorios({ produtos: [{ ...base, nome: "Outro nome" }], combos });
+    expect((await listarProdutos())[0].imagem).toBe(comFoto.imagem);
+    await salvarAcessorios({ produtos: [{ ...base, imagem: { acao: "nova", dados: jpeg(2).toString("base64") } }], combos });
+    expect((await listarProdutos())[0].imagem).not.toBe(comFoto.imagem);
+
+    // arquivo que não é JPEG (aqui, um SVG com script) é recusado e nada muda
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>').toString("base64");
+    await expect(salvarAcessorios({ produtos: [{ ...base, nome: "Não grava", imagem: { acao: "nova", dados: svg } }], combos })).rejects.toBeInstanceOf(FotoRecusada);
+    expect((await listarProdutos())[0].nome).toBe(base.nome);
+    const grande = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(400_001)]).toString("base64");
+    expect(acessoriosParaSalvarSchema.safeParse({ produtos: [{ ...base, imagem: { acao: "nova", dados: grande } }], combos }).success).toBe(false);
+
+    await salvarAcessorios({ produtos: [{ ...base, imagem: { acao: "remover" } }], combos });
+    expect((await listarProdutos())[0].imagem).toBeNull();
+    expect(await fotoDoProduto(atual.id)).toBeNull();
+
+    // apagar o produto leva a foto junto
+    await salvarAcessorios({ produtos: [{ ...base, imagem: { acao: "nova", dados: jpeg(3).toString("base64") } }], combos });
+    await salvarAcessorios({ produtos: [], combos });
+    expect(await fotoDoProduto(atual.id)).toBeNull();
   });
 
   it("recusa gravar valores inválidos", async () => {

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   COMBOS,
+  FOTO,
   LIMITES_DE_ACESSORIOS,
   NOME_DO_TIPO,
   ROTULO_DO_COMBO,
@@ -17,15 +18,41 @@ import {
   type Tipo,
 } from "@/lib/acessorios";
 import { brl } from "@/lib/format";
+import { prepararFoto, type FotoPronta } from "@/lib/foto-cliente";
 import { calcularPedido } from "@/lib/pricing";
 import { centavosDe, reaisDe, type Valores } from "@/lib/valores";
 
-type LinhaDoForm = { chave: number; id?: number; tipo: Tipo; nome: string; descricao: string; reais: string; disponivel: boolean };
+type LinhaDoForm = {
+  chave: number;
+  id?: number;
+  tipo: Tipo;
+  nome: string;
+  descricao: string;
+  reais: string;
+  disponivel: boolean;
+  /** Foto que já está salva. */
+  imagem: string | null;
+  /** Foto escolhida agora, ainda não salva. */
+  nova: FotoPronta | null;
+  /** Tirar a foto salva ao salvar. */
+  tirar: boolean;
+};
 type ComboDoForm = { tipo: "percentual" | "fixo"; texto: string };
 type Dados = { produtos: ProdutoParaSalvar[]; combos: Combos };
 
 const paraLinhas = (produtos: Produto[]): LinhaDoForm[] =>
-  produtos.map((p, i) => ({ chave: i, id: p.id, tipo: p.tipo, nome: p.nome, descricao: p.descricao, reais: reaisDe(p.centavos), disponivel: p.disponivel }));
+  produtos.map((p, i) => ({
+    chave: i,
+    id: p.id,
+    tipo: p.tipo,
+    nome: p.nome,
+    descricao: p.descricao,
+    reais: reaisDe(p.centavos),
+    disponivel: p.disponivel,
+    imagem: p.imagem,
+    nova: null,
+    tirar: false,
+  }));
 const paraCombos = (combos: Combos): Record<Combo, ComboDoForm> =>
   Object.fromEntries(
     COMBOS.map((c) => [
@@ -43,8 +70,11 @@ function ler(linhas: LinhaDoForm[], combos: Record<Combo, ComboDoForm>): { dados
     const centavos = centavosDe(l.reais);
     if (centavos == null) return { erro: `Informe o preço de ${quem} em reais, como 25,00.` };
     if (centavos < 1) return { erro: `O preço de ${quem} precisa ser maior que zero.` };
-    produtos.push({ id: l.id, tipo: l.tipo, nome: l.nome.trim(), descricao: l.descricao.trim(), centavos, disponivel: l.disponivel });
+    const imagem = l.nova ? ({ acao: "nova", dados: l.nova.base64 } as const) : l.tirar ? ({ acao: "remover" } as const) : ({ acao: "manter" } as const);
+    produtos.push({ id: l.id, tipo: l.tipo, nome: l.nome.trim(), descricao: l.descricao.trim(), centavos, disponivel: l.disponivel, imagem });
   }
+  const pesoDasFotos = linhas.reduce((n, l) => n + (l.nova?.base64.length ?? 0), 0);
+  if (pesoDasFotos > FOTO.bytesPorEnvio) return { erro: "São muitas fotos novas de uma vez. Tire a foto de alguns itens, salve, e depois envie as que faltaram." };
   const lidos = {} as Combos;
   for (const c of COMBOS) {
     const { tipo, texto } = combos[c];
@@ -59,7 +89,54 @@ function ler(linhas: LinhaDoForm[], combos: Record<Combo, ComboDoForm>): { dados
     const campo = String(conferido.error.issues[0].path[0]);
     return { erro: campo === "combos" ? `O desconto de um combo passa do limite (${brl(LIMITES_DE_ACESSORIOS.centavos)}).` : `Confira nomes (até 80 letras), descrições (até 160) e preços (até ${brl(LIMITES_DE_ACESSORIOS.centavos)}).` };
   }
-  return { dados: conferido.data };
+  return { dados: { produtos, combos: lidos } };
+}
+
+/** Miniatura da foto do item, com os botões de enviar, trocar e tirar. */
+function Foto({ linha, mudar, avisar }: { linha: LinhaDoForm; mudar: (campos: Partial<LinhaDoForm>) => void; avisar: (texto: string) => void }) {
+  const [abrindo, setAbrindo] = useState(false);
+  const atual = linha.nova?.previa ?? (linha.tirar ? null : linha.imagem);
+  const quem = linha.nome.trim() || "item sem nome";
+  return (
+    <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:flex-col sm:items-start sm:gap-1.5">
+      {atual ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={atual} alt={`Foto de ${quem}`} className="h-[84px] w-[112px] rounded-lg border border-edge bg-ink object-cover" />
+      ) : (
+        <div className="flex h-[84px] w-[112px] items-center justify-center rounded-lg border border-dashed border-edge text-xs text-muted">Sem foto</div>
+      )}
+      <div className="flex gap-3 text-[13px]">
+        <label className="flex min-h-11 cursor-pointer items-center font-semibold underline hover:text-gold-soft sm:min-h-0">
+          {abrindo ? "Abrindo…" : atual ? "Trocar foto" : "Enviar foto"}
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="sr-only"
+            aria-label={`${atual ? "Trocar" : "Enviar"} foto de ${quem}`}
+            disabled={abrindo}
+            onChange={async (e) => {
+              const arquivo = e.target.files?.[0];
+              e.target.value = "";
+              if (!arquivo) return;
+              setAbrindo(true);
+              try {
+                mudar({ nova: await prepararFoto(arquivo), tirar: false });
+              } catch (err) {
+                avisar((err as Error).message);
+              } finally {
+                setAbrindo(false);
+              }
+            }}
+          />
+        </label>
+        {atual && (
+          <button type="button" className="min-h-11 cursor-pointer text-muted underline hover:text-gold-soft sm:min-h-0" aria-label={`Tirar a foto de ${quem}`} onClick={() => mudar({ nova: null, tirar: true })}>
+            Tirar
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function FormularioDeAcessorios({ produtos, combos, valores, podeSalvar }: { produtos: Produto[]; combos: Combos; valores: Valores; podeSalvar: boolean }) {
@@ -112,7 +189,7 @@ export function FormularioDeAcessorios({ produtos, combos, valores, podeSalvar }
     if (!dados) return null;
     const primeiro = (tipo: Tipo): Linha[] => {
       const p = dados.produtos.find((x) => x.tipo === tipo && x.disponivel);
-      return p ? [{ produto: { ...p, id: p.id ?? 0 }, qty: 1 }] : [];
+      return p ? [{ produto: { id: p.id ?? 0, tipo: p.tipo, nome: p.nome, descricao: p.descricao ?? "", centavos: p.centavos, disponivel: true, imagem: null }, qty: 1 }] : [];
     };
     const sleeve = primeiro("sleeve"), deckbox = primeiro("deckbox");
     const casos: Array<[Combo, Linha[]]> = [
@@ -136,6 +213,7 @@ export function FormularioDeAcessorios({ produtos, combos, valores, podeSalvar }
               <ul className="flex flex-col gap-4">
                 {doTipo.map((l) => (
                   <li key={l.chave} className="flex flex-wrap items-end gap-3 border-t border-line pt-4 first:border-t-0 first:pt-0">
+                    <Foto linha={l} mudar={(campos) => mudar(l.chave, campos)} avisar={(texto) => setStatus({ ok: false, texto })} />
                     <div className="min-w-0 flex-[2_1_200px]">
                       <label htmlFor={`a-${l.chave}-nome`} className="label">
                         Nome
@@ -177,7 +255,7 @@ export function FormularioDeAcessorios({ produtos, combos, valores, podeSalvar }
                   type="button"
                   className="btn btn-ghost self-start px-4 text-sm"
                   onClick={() => {
-                    setLinhas([...linhas, { chave: proximaChave, tipo, nome: "", descricao: "", reais: "", disponivel: true }]);
+                    setLinhas([...linhas, { chave: proximaChave, tipo, nome: "", descricao: "", reais: "", disponivel: true, imagem: null, nova: null, tirar: false }]);
                     setProximaChave(proximaChave + 1);
                     setStatus(null);
                   }}

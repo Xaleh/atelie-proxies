@@ -22,7 +22,15 @@ export type Produto = {
   centavos: number;
   /** Falso tira o produto da loja sem apagar do painel. */
   disponivel: boolean;
+  /** Endereço da foto no site, ou null se o produto não tem foto. */
+  imagem: string | null;
 };
+
+/** Limites da foto de um acessório. O painel reduz a imagem antes de enviar. */
+export const FOTO = { lado: 800, bytes: 400_000, bytesPorEnvio: 4_000_000 } as const;
+
+/** O que fazer com a foto ao salvar: deixar como está, tirar ou trocar por uma nova (JPEG em base64). */
+export type FotoParaSalvar = { acao: "manter" } | { acao: "remover" } | { acao: "nova"; dados: string };
 
 /**
  * Desconto de um combo. "percentual": `valor` em centésimos de 1% (750 = 7,5%).
@@ -45,6 +53,11 @@ const SEM_DESCONTO: Desconto = { tipo: "percentual", valor: 0 };
 export const COMBOS_PADRAO: Combos = { sleeves: SEM_DESCONTO, deckbox: SEM_DESCONTO, completo: SEM_DESCONTO };
 
 export const LIMITES_DE_ACESSORIOS = { centavos: 100_000, produtos: 60, porProduto: 20, percentual: 10_000 } as const;
+
+/** Endereço público da foto. O `v` muda quando a foto muda, então pode ficar em cache para sempre. */
+export function enderecoDaFoto(id: number, hash: string): string {
+  return `/api/acessorios/${id}/imagem?v=${hash}`;
+}
 
 /** O que a cliente escolheu: o produto e quantas unidades. */
 export type Escolha = { id: number; qty: number };
@@ -98,8 +111,16 @@ export const produtoParaSalvarSchema = z.object({
   descricao: z.string().trim().max(160).default(""),
   centavos: z.number().int().min(1, "O preço do acessório precisa ser maior que zero").max(LIMITES_DE_ACESSORIOS.centavos),
   disponivel: z.boolean(),
+  imagem: z
+    .discriminatedUnion("acao", [
+      z.object({ acao: z.literal("manter") }),
+      z.object({ acao: z.literal("remover") }),
+      // base64 ocupa 4/3 do tamanho do arquivo
+      z.object({ acao: z.literal("nova"), dados: z.string().regex(/^[A-Za-z0-9+/]+=*$/, "foto inválida").max(Math.ceil((FOTO.bytes * 4) / 3) + 4, "A foto ficou grande demais") }),
+    ])
+    .default({ acao: "manter" }),
 });
-export type ProdutoParaSalvar = z.infer<typeof produtoParaSalvarSchema>;
+export type ProdutoParaSalvar = z.input<typeof produtoParaSalvarSchema>;
 
 export const acessoriosParaSalvarSchema = z.object({
   produtos: z.array(produtoParaSalvarSchema).max(LIMITES_DE_ACESSORIOS.produtos),

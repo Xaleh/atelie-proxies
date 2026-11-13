@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { acessoriosParaSalvarSchema } from "@/lib/acessorios";
-import { listarProdutos, salvarAcessorios } from "@/lib/acessorios-servidor";
+import { FotoRecusada, listarProdutos, salvarAcessorios } from "@/lib/acessorios-servidor";
 import { estaLogado } from "@/lib/session";
 
 /** Grava o catálogo de acessórios e os descontos dos combos, e devolve o catálogo como ficou. */
@@ -14,6 +14,7 @@ export async function POST(request: Request) {
     await salvarAcessorios(parsed.data);
     return NextResponse.json({ ok: true, produtos: await listarProdutos() });
   } catch (err) {
+    if (err instanceof FotoRecusada) return NextResponse.json({ error: err.message }, { status: 400 });
     console.error("[admin/acessorios]", err);
     return NextResponse.json({ error: "Não consegui gravar no banco." }, { status: 500 });
   }

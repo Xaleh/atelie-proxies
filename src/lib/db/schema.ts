@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { blob, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const STATUS = ["recebido", "pago", "producao", "enviado", "cancelado"] as const;
 export type Status = (typeof STATUS)[number];
@@ -92,6 +92,21 @@ export const products = sqliteTable("products", {
   available: integer("available", { mode: "boolean" }).notNull().default(true),
   /** Ordem em que aparece na loja e no painel. */
   position: integer("position").notNull().default(0),
+  updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+});
+
+/**
+ * Foto do acessório, já reduzida pelo painel (JPEG de até 800 px). Fica numa
+ * tabela à parte para a lista de produtos não carregar as imagens.
+ */
+export const productImages = sqliteTable("product_images", {
+  productId: integer("product_id")
+    .primaryKey()
+    .references(() => products.id, { onDelete: "cascade" }),
+  mime: text("mime").notNull(),
+  data: blob("data", { mode: "buffer" }).notNull(),
+  /** Resumo do conteúdo; entra no endereço da imagem para o navegador guardar em cache sem medo. */
+  hash: text("hash").notNull(),
   updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
 });
 

@@ -27,7 +27,8 @@ export default async function AcessoriosPage() {
       <h1 className="display text-[40px]">Acessórios</h1>
       <p className="max-w-3xl text-base text-muted">
         Sleeves e deckboxes que a cliente pode levar junto com as cartas, e o desconto de cada combo. Só aparece na loja o
-        que estiver marcado como disponível. Pedidos já feitos mantêm o nome e o preço de quando foram fechados.
+        que estiver marcado como disponível, e sempre junto com um pedido de cartas. A foto é opcional; o painel reduz a
+        imagem antes de enviar. Pedidos já feitos mantêm o nome e o preço de quando foram fechados.
       </p>
       {!bancoOk && (
         <p className="panel border-gold p-4">

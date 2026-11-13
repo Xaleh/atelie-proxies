@@ -103,7 +103,9 @@ sleeves, cartas + deckbox e cartas + sleeves + deckbox. O desconto pode ser
 percentual ou um valor fixo em reais, e incide sobre cartas + acessórios; o
 frete fica de fora. Só aparece na loja o que estiver marcado como disponível;
 sem nenhum item disponível, a seção de acessórios some. Acessório só é vendido
-junto com cartas. O pedido guarda o nome e o preço de cada acessório na hora da
+junto com cartas. Cada item pode ter uma foto: o painel reduz a imagem no
+navegador (JPEG de até 800 px e 400 KB) e ela fica guardada no banco, servida
+por `/api/acessorios/<id>/imagem` com cache longo. O pedido guarda o nome e o preço de cada acessório na hora da
 compra, então mudar ou remover um item do catálogo não altera pedidos feitos.
 
 Se os valores mudarem enquanto uma cliente está com a página de fechamento
