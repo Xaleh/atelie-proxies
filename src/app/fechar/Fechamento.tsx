@@ -7,6 +7,7 @@ import { useCart } from "@/lib/cart";
 import { brl } from "@/lib/format";
 import { calcularTotais, type Entrega } from "@/lib/pricing";
 import { useSituacoes } from "@/lib/traducao/carrinho";
+import type { Valores } from "@/lib/valores";
 
 type Erros = Partial<Record<"nome" | "contato" | "cep" | "endereco" | "itens" | "pedido", string>>;
 
@@ -19,7 +20,7 @@ function Erro({ id, texto }: { id: string; texto?: string }) {
   );
 }
 
-export function Fechamento() {
+export function Fechamento({ valores: valoresIniciais }: { valores: Valores }) {
   const router = useRouter();
   const { itens, pronto, quantidade, limpar } = useCart();
   const { situacao, emPortugues } = useSituacoes(itens);
@@ -28,7 +29,9 @@ export function Fechamento() {
   const [enviando, setEnviando] = useState(false);
   const [erros, setErros] = useState<Erros>({});
   const [falha, setFalha] = useState<string | null>(null);
-  const totais = calcularTotais(quantidade, entrega);
+  // Se o ateliê mudar os valores com esta página aberta, o site devolve os novos ao confirmar.
+  const [valores, setValores] = useState(valoresIniciais);
+  const totais = calcularTotais(valores, quantidade, entrega);
 
   async function enviar(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -48,6 +51,7 @@ export function Fechamento() {
           endereco: form.get("endereco") ?? "",
           observacoes: form.get("observacoes") ?? "",
           site: form.get("site") ?? "",
+          totalEsperado: totais.total,
           itens: itens.map((item) => {
             const { print: p, modo, tr } = situacao(item);
             const traduzida = modo === "traduzida";
@@ -66,8 +70,9 @@ export function Fechamento() {
           }),
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as { token?: string; error?: string; erros?: Erros };
+      const data = (await res.json().catch(() => ({}))) as { token?: string; error?: string; erros?: Erros; valores?: Valores };
       if (!res.ok || !data.token) {
+        if (data.valores) setValores(data.valores);
         setErros(data.erros ?? {});
         setFalha(data.error ?? "Não foi possível registrar o pedido. Tente de novo.");
         return;

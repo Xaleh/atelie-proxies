@@ -4,12 +4,12 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { CartaPrevia } from "@/components/CartaPrevia";
 import { Seal } from "@/components/Seal";
-import { loja } from "@/config/loja";
 import { useCart } from "@/lib/cart";
 import { parseDecklist } from "@/lib/decklist";
 import { brl } from "@/lib/format";
 import { calcularTotais, folhas, proximaFaixa } from "@/lib/pricing";
 import { facesFisicas } from "@/lib/traducao/tipos";
+import type { Valores } from "@/lib/valores";
 import { useSituacoes, type Situacao } from "@/lib/traducao/carrinho";
 import { impressaoEscolhida, type CardPrint, type CartItem, type CatalogEntry } from "@/lib/types";
 
@@ -319,10 +319,10 @@ function Tile({ item, sit }: { item: CartItem; sit: Situacao }) {
   );
 }
 
-function Resumo({ emPortugues, semPt, versos }: { emPortugues: number; semPt: number; versos: number }) {
+function Resumo({ emPortugues, semPt, versos, valores }: { emPortugues: number; semPt: number; versos: number; valores: Valores }) {
   const { quantidade } = useCart();
-  const totais = calcularTotais(quantidade, "retirada");
-  const proxima = proximaFaixa(quantidade);
+  const totais = calcularTotais(valores, quantidade, "retirada");
+  const proxima = proximaFaixa(valores, quantidade);
 
   return (
     <aside aria-label="Resumo do pedido" className="flex min-w-0 flex-[1_1_300px] flex-col gap-4 rounded-2xl bg-cream p-6 text-ink lg:sticky lg:top-6">
@@ -380,16 +380,16 @@ function Resumo({ emPortugues, semPt, versos }: { emPortugues: number; semPt: nu
           em português nesta arte e {semPt === 1 ? "sai" : "saem"} em inglês.
         </p>
       )}
-      {quantidade > loja.maxCartasPorPedido && (
+      {quantidade > valores.maxCartasPorPedido && (
         <p className="text-[13px] font-semibold text-rust">
-          O limite é de {loja.maxCartasPorPedido} cartas por pedido.
+          O limite é de {valores.maxCartasPorPedido} cartas por pedido.
         </p>
       )}
     </aside>
   );
 }
 
-export function Montador() {
+export function Montador({ valores }: { valores: Valores }) {
   const { itens, pronto, quantidade, tudoEmPortugues, limpar } = useCart();
   const { situacao, emPortugues } = useSituacoes(itens);
   const semPt = itens.filter((i) => situacao(i).modo === "indisponivel" && !situacao(i).carregando).length;
@@ -435,7 +435,7 @@ export function Montador() {
             ))}
           </div>
         </section>
-        <Resumo emPortugues={emPortugues} semPt={semPt} versos={versos} />
+        <Resumo emPortugues={emPortugues} semPt={semPt} versos={versos} valores={valores} />
       </div>
     </>
   );

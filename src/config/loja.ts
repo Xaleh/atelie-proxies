@@ -1,8 +1,9 @@
 /**
  * Configuração da loja. Preços e frete estão em centavos.
  *
- * ATENÇÃO: os valores de `faixasDePreco` e `freteFixoCentavos` são
- * provisórios. Ajuste antes de divulgar o site.
+ * `faixasDePreco`, `freteFixoCentavos` e `maxCartasPorPedido` são só os
+ * valores iniciais: o ateliê muda os três em /admin/valores, e o que for
+ * salvo lá fica no banco e passa a valer no lugar destes.
  */
 export const loja = {
   nome: "Proxy do Reis",
