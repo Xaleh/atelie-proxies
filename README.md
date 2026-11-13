@@ -8,7 +8,8 @@ painel em `/admin`.
 ## O que já funciona
 
 - **Loja:** página inicial e montador com busca por nome (inglês ou português),
-  colagem de lista de deck, troca de arte e seletor EN/PT por carta.
+  colagem de lista de deck, troca de arte (clicando na carta) e seletor EN/PT
+  por carta.
 - **Pedido:** fechamento sem cadastro, preço por faixa de quantidade calculado
   no servidor, página de acompanhamento em `/pedido/<token>`.
 - **Pagamento:** Pix copia-e-cola com QR (confirmado à mão no painel) e
@@ -21,7 +22,9 @@ painel em `/admin`.
   paisagem com 8 cartas. Dá para reordenar, duplicar, tirar e completar as
   vagas com cartas avulsas, e baixar o PDF de impressão e o gabarito de corte
   em DXF. O verso das cartas de duas faces é sempre impresso, como uma carta a
-  mais, e anda junto com a frente ao mover, duplicar ou tirar. A geometria e as marcas de registro são as mesmas do site de
+  mais, e anda junto com a frente ao mover, duplicar ou tirar. Clicar numa
+  carta abre as artes dela para trocar a daquela cópia ou a de todas as cópias
+  no lote; a troca vale para a impressão e não muda o pedido gravado. A geometria e as marcas de registro são as mesmas do site de
   produção anterior, então o gabarito da Silhouette Portrait 4 continua valendo.
 - **Texto em português sobre a arte em inglês:** quando a cliente escolhe PT
   numa arte que só existe em inglês, o site escreve nome, tipo e texto em

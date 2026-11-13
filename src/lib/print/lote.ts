@@ -1,4 +1,5 @@
 import type { MetaDeImpressao } from "../traducao/tipos";
+import type { CardPrint } from "../types";
 
 /**
  * O lote de produção: a lista de cartas na ordem em que vão para as folhas.
@@ -130,6 +131,76 @@ export function completarVersos(slots: Slot[], detalhes: Map<string, DetalheDeIm
     }
   }
   return out.length === slots.length ? slots : out;
+}
+
+/**
+ * Uma impressão vinda da busca de artes, no formato da produção. A busca só
+ * traz a frente: para carta de duas faces, os detalhes vêm do Scryfall.
+ */
+export function detalheDaFrente(print: CardPrint): DetalheDeImpressao {
+  return {
+    id: print.id,
+    oracleId: print.oracleId,
+    nome: print.name,
+    lang: print.lang,
+    set: print.set,
+    collectorNumber: print.collectorNumber,
+    faces: [{ nome: print.printedName ?? print.name, normal: print.image, png: pngDaImagemNormal(print.image) }],
+    meta: print.meta,
+  };
+}
+
+/** Cópias da mesma carta no lote, seja qual for a arte de cada uma. */
+function mesmaCarta(a: Slot, b: Slot): boolean {
+  return a.oracleId && b.oracleId ? a.oracleId === b.oracleId : a.printId === b.printId;
+}
+
+/** Quantas cópias da carta da posição `i` estão no lote. */
+export function copiasDaCarta(slots: Slot[], i: number): number {
+  const alvo = slots[i];
+  return alvo ? new Set(slots.filter((sl) => mesmaCarta(sl, alvo)).map((sl) => sl.grupo)).size : 0;
+}
+
+/**
+ * Troca a arte da carta da posição `i`, frente e verso, sem tirá-la do lugar.
+ * Com `todas`, troca em todas as cópias da mesma carta.
+ *
+ * O idioma pedido continua valendo: carta em português numa arte em inglês
+ * recebe o texto traduzido por cima; arte em português já sai em português.
+ */
+export function trocarArte(slots: Slot[], i: number, nova: DetalheDeImpressao, todas = false): Slot[] {
+  const alvo = slots[i];
+  if (!alvo || nova.faces.length === 0) return slots;
+  const grupos = new Set(todas ? slots.filter((sl) => mesmaCarta(sl, alvo)).map((sl) => sl.grupo) : [alvo.grupo]);
+  const artePt = nova.lang === "pt";
+  const out: Slot[] = [];
+  for (const sl of slots) {
+    if (!grupos.has(sl.grupo)) {
+      out.push(sl);
+      continue;
+    }
+    // as faces da arte nova entram no lugar da frente; o verso antigo sai
+    if (sl.face !== 0) continue;
+    const emPt = sl.lang === "pt" || sl.traduzida;
+    nova.faces.forEach((f, face) => {
+      out.push({
+        ...sl,
+        uid: `${sl.grupo}-${face}`,
+        printId: nova.id,
+        oracleId: sl.oracleId || nova.oracleId || "",
+        face,
+        nomeEn: nova.meta?.faces[face]?.nome ?? nova.nome.split(" // ")[face] ?? nova.nome,
+        set: nova.set,
+        num: nova.collectorNumber,
+        traduzida: emPt && !artePt,
+        nome: f.nome,
+        lang: emPt || artePt ? "pt" : "en",
+        thumb: f.normal,
+        png: f.png,
+      });
+    });
+  }
+  return out;
 }
 
 /** Primeira e última posição do grupo (frente e verso da mesma cópia), que ficam sempre lado a lado. */
