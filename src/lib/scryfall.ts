@@ -130,16 +130,24 @@ async function paginaDaBusca(
 }
 
 /**
+ * Intervalo entre as páginas de uma mesma busca. O Scryfall aceita até 10
+ * chamadas por segundo e bloqueia o servidor por uns minutos quando passa
+ * disso (a busca de cartas do site inteiro para junto), então fica bem abaixo.
+ */
+const PAUSA_ENTRE_PAGINAS = 250;
+
+/**
  * Todas as páginas de uma busca. A primeira diz quantas cartas existem; as
- * outras saem uma a cada 100 ms (o intervalo que o Scryfall pede), sem esperar
- * a anterior responder, para a carta com mais de mil impressões não demorar.
+ * outras saem uma a cada 250 ms, sem esperar a anterior responder, para a
+ * carta com mais de mil impressões não demorar (uma depois da outra, a
+ * Floresta levava 15 s).
  */
 async function searchCompleta(q: string, opts: OpcoesDeBusca, maxPaginas: number): Promise<CardPrint[]> {
   const primeira = await paginaDaBusca(q, opts, 1);
   const paginas = primeira.temMais ? Math.min(maxPaginas, Math.max(2, Math.ceil(primeira.total / CARTAS_POR_PAGINA))) : 1;
   const resto = await Promise.all(
     Array.from({ length: Math.max(0, paginas - 1) }, async (_, i) => {
-      await pausa(100 * (i + 1));
+      await pausa(PAUSA_ENTRE_PAGINAS * (i + 1));
       return (await paginaDaBusca(q, opts, i + 2)).cards;
     }),
   );
