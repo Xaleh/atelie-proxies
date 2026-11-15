@@ -9,9 +9,11 @@ import {
   aceitaMoldeAutomatico,
   basicoDeArteInteira,
   chaveDoSabor,
+  ehAventura,
   facesFisicas,
   moldeParaUsar,
   moldeSchema,
+  nomesDaFace,
   type MetaDeImpressao,
 } from "@/lib/traducao/tipos";
 import { impressaoEscolhida, modoDoTexto, type CardPrint } from "@/lib/types";
@@ -81,6 +83,24 @@ describe("molde", () => {
     expect(moldeParaUsar(meta(), null)).toBe("auto");
     expect(moldeParaUsar(meta({ frame: "1997" }), null)).toBe("auto");
     expect(moldeParaUsar(meta({ frame: "future" }), null)).toBeNull();
+  });
+
+  it("trata a carta de aventura como uma carta com dois textos", () => {
+    const parte = (nome: string) => ({ nome, tipo: "", texto: "", sabor: false, mana: "", temPT: false });
+    const aventura = meta({ layout: "adventure", faces: [parte("Bonecrusher Giant"), parte("Stomp")] });
+    expect(ehAventura(aventura)).toBe(true);
+    expect(ehAventura(meta())).toBe(false);
+    expect(ehAventura(meta({ layout: "adventure" }))).toBe(false);
+    expect(ehAventura(undefined)).toBe(false);
+    // uma carta física só, com o molde automático da moldura de 2015
+    expect(facesFisicas(aventura)).toBe(1);
+    expect(aceitaMoldeAutomatico(aventura)).toBe(true);
+    expect(aceitaMoldeAutomatico({ ...aventura, frame: "2003" })).toBe(false);
+    // as duas partes precisam de tradução
+    expect(nomesDaFace(aventura, 0, "x")).toEqual(["Bonecrusher Giant", "Stomp"]);
+    const duasFaces = meta({ layout: "transform", faces: [parte("Frente"), parte("Verso")] });
+    expect(nomesDaFace(duasFaces, 1, "x")).toEqual(["Verso"]);
+    expect(nomesDaFace(undefined, 0, "Sol Ring")).toEqual(["Sol Ring"]);
   });
 
   it("reconhece o terreno básico de arte inteira", () => {

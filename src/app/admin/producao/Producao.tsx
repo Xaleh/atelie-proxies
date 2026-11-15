@@ -33,7 +33,7 @@ import {
 } from "@/lib/print/lote";
 import { baixarArquivo, gerarPdf, type TraducaoDoSlot } from "@/lib/print/pdf";
 import { facesFisicas } from "@/lib/traducao/tipos";
-import { useTraducoes } from "@/lib/traducao/cliente";
+import { pedidosDaFace, useTraducoes } from "@/lib/traducao/cliente";
 import { useDiagramacao, type PedidoDeConferencia } from "@/lib/traducao/diagramacao";
 import { previaTraduzida } from "@/lib/traducao/render";
 import type { CardPrint, CatalogEntry } from "@/lib/types";
@@ -303,17 +303,20 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
     const vistas = new Map<string, { oracleId: string; nome: string; set: string; num: string; printId: string; face: number }>();
     for (const sl of slots ?? []) {
       if (!(sl.lang === "en" || sl.traduzida) || !sl.oracleId) continue;
-      vistas.set(`${sl.printId}#${sl.face}`, {
+      // a carta de aventura pede as duas partes: a criatura e a aventura
+      const pedidos = pedidosDaFace({
         oracleId: sl.oracleId,
+        meta: detalhes.get(sl.printId)?.meta,
+        face: sl.face,
         nome: sl.nomeEn,
         set: sl.set,
         num: sl.num,
         printId: sl.printId,
-        face: sl.face,
       });
+      for (const p of pedidos) vistas.set(`${p.printId}#${p.face}`, p);
     }
     return [...vistas.values()];
-  }, [slots]);
+  }, [slots, detalhes]);
   const t = useTraducoes(facesParaTraduzir);
 
   // Artes que vão receber o molde automático têm a imagem da frente conferida:
@@ -330,14 +333,15 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
   const traducaoDe = (sl: Slot): TraducaoDoSlot | null => {
     if (!sl.traduzida) return null;
     const meta = detalhes.get(sl.printId)?.meta;
-    const tr = t.textoPara(sl.nomeEn, sl.set, sl.num);
+    const tr = t.textoDaFace(meta, sl.face, sl.nomeEn, sl.set, sl.num);
     const molde = t.moldeQueVale(sl.printId, sl.face, meta);
     return meta && tr && molde && !arteEspecial(sl) ? { meta, face: sl.face, tr, molde } : null;
   };
   const situacaoPT = (sl: Slot): string | null => {
     if (!sl.traduzida) return null;
-    if (t.traducao(sl.nomeEn) === undefined) return "PT · verificando";
-    if (!t.textoPara(sl.nomeEn, sl.set, sl.num)) return "PT · sem tradução";
+    const meta = detalhes.get(sl.printId)?.meta;
+    if (t.buscando(meta, sl.face, sl.nomeEn)) return "PT · verificando";
+    if (!t.textoDaFace(meta, sl.face, sl.nomeEn, sl.set, sl.num)) return "PT · sem tradução";
     if (!t.moldeQueVale(sl.printId, sl.face, detalhes.get(sl.printId)?.meta)) return "PT · sem molde";
     if (arteEspecial(sl)) return "PT · arte especial";
     return "PT traduzida";

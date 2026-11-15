@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { CartaPrevia } from "@/components/CartaPrevia";
 import { esquecerTraducoes, useTraducoes } from "@/lib/traducao/cliente";
-import { ROTULO_DA_FONTE, type MetaDeFace, type Traducao } from "@/lib/traducao/tipos";
+import { ROTULO_DA_FONTE, ehAventura, type MetaDeFace, type Traducao } from "@/lib/traducao/tipos";
 import type { CatalogEntry } from "@/lib/types";
 
 type Arquivo = {
@@ -102,6 +102,7 @@ function FormularioDaFace({
   atual,
   carregando,
   molde,
+  aventura,
 }: {
   entry: CatalogEntry;
   face: number;
@@ -109,6 +110,8 @@ function FormularioDaFace({
   atual: Traducao | null;
   carregando: boolean;
   molde: ReturnType<ReturnType<typeof useTraducoes>["moldeQueVale"]>;
+  /** Nas cartas de aventura: a tradução salva da aventura, que a prévia desenha junto. */
+  aventura?: Campos | null;
 }) {
   const vazio: Campos = { nome: "", tipo: "", texto: "", sabor: "" };
   const deAtual = (t: Traducao | null): Campos => (t ? { nome: t.nome, tipo: t.tipo, texto: t.texto, sabor: t.sabor } : vazio);
@@ -201,11 +204,17 @@ function FormularioDaFace({
             alt={`Prévia de ${valores.nome || info.nome}`}
             className="aspect-[63/88] w-full rounded-lg bg-ink object-cover"
             meta={entry.en.meta}
-            tr={valores.nome ? valores : null}
+            tr={!valores.nome || aventura === null ? null : aventura ? { ...valores, aventura } : valores}
             molde={molde}
           />
           <p className="text-xs text-muted">
-            {molde ? `Prévia na arte de ${entry.en.setName}.` : "Esta arte não tem molde: a prévia mostra a carta original."}
+            {!molde
+              ? "Esta arte não tem molde: a prévia mostra a carta original."
+              : aventura === null
+                ? "Carta de aventura: a prévia aparece quando a aventura, logo abaixo, também tiver tradução."
+                : aventura
+                  ? `Prévia na arte de ${entry.en.setName}, com a tradução salva da aventura.`
+                  : `Prévia na arte de ${entry.en.setName}.`}
           </p>
           <Link href={`/admin/moldes/${entry.en.id}?face=0`} target="_blank" className="py-2 text-xs font-semibold underline hover:text-gold-soft">
             Marcar o molde desta arte
@@ -234,6 +243,8 @@ function CartaEmRevisao({ entry }: { entry: CatalogEntry }) {
     [faces, entry],
   );
   const t = useTraducoes(pedidos);
+  // Carta de aventura: uma imagem só, e a prévia da criatura leva também o texto da aventura.
+  const aventura = ehAventura(entry.en.meta) ? t.textoPara(faces[1].nome, entry.en.set, entry.en.collectorNumber) : undefined;
   return (
     <div className="flex flex-col gap-4">
       {faces.map((f, i) => (
@@ -245,6 +256,7 @@ function CartaEmRevisao({ entry }: { entry: CatalogEntry }) {
           atual={t.traducao(f.nome) ?? null}
           carregando={t.traducao(f.nome) === undefined}
           molde={t.moldeQueVale(entry.en.id, i, entry.en.meta)}
+          aventura={i === 0 ? aventura : undefined}
         />
       ))}
     </div>

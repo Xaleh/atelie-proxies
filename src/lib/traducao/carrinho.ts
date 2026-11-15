@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { impressaoEscolhida, modoDoTexto, type CardPrint, type CartItem, type ModoDoTexto } from "../types";
-import { useTraducoes } from "./cliente";
+import { pedidosDaFace, useTraducoes } from "./cliente";
 import { useDiagramacao, type PedidoDeConferencia } from "./diagramacao";
 import type { PedidoDeTraducao } from "./servidor";
 import type { MoldeManual } from "./tipos";
@@ -26,16 +26,19 @@ function nomeDaFrente(p: CardPrint): string {
   return p.meta?.faces[0]?.nome ?? p.name.split(" // ")[0];
 }
 
-/** Pedido de tradução da frente da arte em inglês de cada item. */
+/** Pedidos de tradução da frente da arte em inglês de cada item (dois nas cartas de aventura). */
 export function facesDoCarrinho(itens: CartItem[]): PedidoDeTraducao[] {
-  return itens.map((i) => ({
-    oracleId: i.oracleId,
-    nome: nomeDaFrente(i.en),
-    set: i.en.set,
-    num: i.en.collectorNumber,
-    printId: i.en.id,
-    face: 0,
-  }));
+  return itens.flatMap((i) =>
+    pedidosDaFace({
+      oracleId: i.oracleId,
+      meta: i.en.meta,
+      face: 0,
+      nome: nomeDaFrente(i.en),
+      set: i.en.set,
+      num: i.en.collectorNumber,
+      printId: i.en.id,
+    }),
+  );
 }
 
 /** Como cada carta do carrinho sai: idioma, arte e o que desenhar. */
@@ -49,7 +52,7 @@ export function useSituacoes(itens: CartItem[]) {
     for (const item of itens) {
       const meta = item.en.meta;
       if (item.lang !== "pt" || impressaoEscolhida(item).lang === "pt" || !meta) continue;
-      if (!t.textoPara(nomeDaFrente(item.en), item.en.set, item.en.collectorNumber)) continue;
+      if (!t.textoDaFace(meta, 0, nomeDaFrente(item.en), item.en.set, item.en.collectorNumber)) continue;
       if (t.moldeQueVale(item.en.id, 0, meta) === "auto") out.push({ printId: item.en.id, url: item.en.image, meta });
     }
     return out;
@@ -59,7 +62,7 @@ export function useSituacoes(itens: CartItem[]) {
     const esperando = new Set(aConferir.map((p) => p.printId));
     const situacao = (item: CartItem): Situacao => {
       const nome = nomeDaFrente(item.en);
-      const tr = t.textoPara(nome, item.en.set, item.en.collectorNumber);
+      const tr = t.textoDaFace(item.en.meta, 0, nome, item.en.set, item.en.collectorNumber);
       let molde = t.moldeQueVale(item.en.id, 0, item.en.meta);
       const ok = molde === "auto" ? conferida(item.en.id) : true;
       const arteEspecial = ok === false;
@@ -71,7 +74,7 @@ export function useSituacoes(itens: CartItem[]) {
         modo: modoDoTexto(item, podeTraduzir),
         print: impressaoEscolhida(item),
         podeTraduzir,
-        carregando: t.traducao(nome) === undefined || conferindo,
+        carregando: t.buscando(item.en.meta, 0, nome) || conferindo,
         arteEspecial,
         tr,
         molde,

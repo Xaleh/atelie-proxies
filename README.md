@@ -38,9 +38,11 @@ painel em `/admin`.
   `traducoes-arena.json` do agente do Arena (a importação substitui a anterior)
   e revisar o texto de qualquer carta.
 - **Moldes:** o texto entra sozinho nas artes com a moldura moderna (2015),
-  inclusive os terrenos básicos de arte inteira e as cartas com o texto solto
-  sobre a arte (moldura de quadrinho), e nas molduras antigas (1993, 1997 e
-  2003, inclusive as reimpressões "retrô"). Antes de prometer a tradução, o
+  inclusive as cartas de aventura, os terrenos básicos de arte inteira e as
+  cartas com o texto solto sobre a arte (moldura de quadrinho), e nas molduras
+  antigas (1993, 1997 e 2003, inclusive as reimpressões "retrô"). A carta de
+  aventura leva dois textos, o da criatura e o da aventura: ela só sai em
+  português quando os dois têm tradução. Antes de prometer a tradução, o
   site confere a imagem da arte: se ela não tem as barras e caixas no lugar
   (arte que ocupa a carta toda, Secret Lair ilustrado), a carta aparece como
   "PT indisponível nesta arte" na loja e "PT · arte especial" na produção, e
