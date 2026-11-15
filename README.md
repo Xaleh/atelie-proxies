@@ -10,6 +10,11 @@ painel em `/admin`.
 - **Loja:** página inicial e montador com busca por nome (inglês ou português),
   colagem de lista de deck, troca de arte (clicando na carta) e seletor EN/PT
   por carta.
+- **Lupa:** com o mouse parado em cima de uma carta, ela aparece ampliada ao
+  lado do cursor; no celular, segurar o dedo um segundo abre a carta no meio
+  da tela. Vale nas cartas do pedido, na janela de artes e na grade da
+  produção (qualquer carta marcada com `data-lupa`; código em
+  `src/components/Lupa.tsx`).
 - **Pedido:** fechamento sem cadastro, preço por faixa de quantidade calculado
   no servidor, página de acompanhamento em `/pedido/<token>`.
 - **Pagamento:** Pix copia-e-cola com QR (confirmado à mão no painel) e

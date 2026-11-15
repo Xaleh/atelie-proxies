@@ -11,6 +11,7 @@ import "@fontsource/crimson-pro/400.css";
 import "@fontsource/crimson-pro/400-italic.css";
 import "@fontsource/crimson-pro/700.css";
 import "./globals.css";
+import { Lupa } from "@/components/Lupa";
 import { loja } from "@/config/loja";
 import { CartProvider } from "@/lib/cart";
 
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="pt-BR" className="h-full antialiased">
       <body className="flex min-h-full flex-col">
         <CartProvider>{children}</CartProvider>
+        <Lupa />
       </body>
     </html>
   );

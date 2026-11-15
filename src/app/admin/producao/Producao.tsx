@@ -630,11 +630,11 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
                             }}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={imagemDe(sl)} alt={sl.nome} loading="lazy" draggable={false} className="aspect-[63/88] w-full rounded-lg bg-ink object-cover" />
+                            <img src={imagemDe(sl)} alt={sl.nome} loading="lazy" draggable={false} data-lupa className="aspect-[63/88] w-full rounded-lg bg-ink object-cover" />
                           </div>
                         ) : (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={imagemDe(sl)} alt={sl.nome} loading="lazy" draggable={false} className="aspect-[63/88] w-full rounded-lg bg-ink object-cover" />
+                          <img src={imagemDe(sl)} alt={sl.nome} loading="lazy" draggable={false} data-lupa className="aspect-[63/88] w-full rounded-lg bg-ink object-cover" />
                         )}
                         <span className="truncate text-xs text-muted">
                           {[sl.face > 0 ? "verso" : "", situacaoPT(sl) ?? sl.lang.toUpperCase(), sl.origem].filter(Boolean).join(" · ")}

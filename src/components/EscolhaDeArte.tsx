@@ -77,7 +77,7 @@ export function EscolhaDeArte({
                   }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={p.image} alt="" loading="lazy" className="aspect-[63/88] w-full rounded-md bg-ink object-cover" />
+                  <img src={p.image} alt="" loading="lazy" data-lupa className="aspect-[63/88] w-full rounded-md bg-ink object-cover" />
                   <span className="truncate text-xs text-muted">{p.setName}</span>
                   {/* o idioma fica na linha curta, que nunca é cortada pelo nome da edição */}
                   <span className="truncate font-mono text-[11px] uppercase text-muted">

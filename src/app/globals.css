@@ -69,3 +69,46 @@ body {
     @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider;
   }
 }
+
+/* Lupa: a carta ampliada ao lado do mouse (src/components/Lupa.tsx). */
+.lupa {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  width: min(360px, 42vw);
+  aspect-ratio: 63 / 88;
+  border-radius: 4.6% / 3.3%;
+  background: #111 center / cover no-repeat;
+  box-shadow:
+    0 18px 50px rgb(0 0 0 / 0.55),
+    0 0 0 1px rgb(0 0 0 / 0.35);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.lupa.on {
+  opacity: 1;
+}
+/* No celular: segurar a carta um segundo abre ela grande no meio da tela; um toque fecha. */
+.lupa.toque {
+  left: 50% !important;
+  top: 50% !important;
+  width: min(88vw, 430px, calc(86vh * 63 / 88));
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+}
+.lupa-fundo {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: rgb(0 0 0 / 0.6);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.lupa-fundo.on {
+  opacity: 1;
+}
+/* Segurar o dedo na carta não abre o menu de imagem nem seleciona nada. */
+[data-lupa] {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
