@@ -37,13 +37,17 @@ painel em `/admin`.
 - **Traduções no painel:** em `/admin/traducoes`, importar o
   `traducoes-arena.json` do agente do Arena (a importação substitui a anterior)
   e revisar o texto de qualquer carta.
-- **Moldes:** artes com a moldura moderna (2015) ou a antiga (1993, de Alpha a
-  Mirage) recebem o texto sozinhas. Na moldura antiga o resultado depende do
-  scan: cartas brancas e as de Alpha e Beta podem sair com o nome fora do
-  lugar, e aí vale o molde manual. Para essas e para as outras artes (sem
-  borda, vitrine, arte estendida), em `/admin/moldes/<id>` o
-  Augusto marca onde ficam nome, tipo e texto, ou desliga o português naquela
-  arte. Na produção, o botão "Molde" de cada carta abre essa tela.
+- **Moldes:** o texto entra sozinho nas artes com a moldura moderna (2015),
+  inclusive os terrenos básicos de arte inteira e as cartas com o texto solto
+  sobre a arte (moldura de quadrinho), e nas molduras antigas (1993, 1997 e
+  2003, inclusive as reimpressões "retrô"). Antes de prometer a tradução, o
+  site confere a imagem da arte: se ela não tem as barras e caixas no lugar
+  (arte que ocupa a carta toda, Secret Lair ilustrado), a carta aparece como
+  "PT indisponível nesta arte" na loja e "PT · arte especial" na produção, e
+  sai em inglês. Para essas e para as outras artes sem molde, em
+  `/admin/moldes/<id>` o Augusto marca onde ficam nome, tipo e texto, ou
+  desliga o português naquela arte. Na produção, o botão "Molde" de cada carta
+  abre essa tela. Nas molduras antigas o resultado depende do scan da carta.
 
 ## O que ainda não entrou
 

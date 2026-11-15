@@ -1,26 +1,34 @@
 /**
  * Escreve a tradução sobre a arte em inglês, num canvas do navegador.
  * O molde automático é o do site de produção do ateliê, portado sem mudar as
- * medidas: moldura moderna (2015) e moldura antiga (1993). O molde manual usa
- * os retângulos marcados no painel para aquela arte.
+ * medidas: moldura moderna (2015), terreno básico de arte inteira, texto
+ * solto sobre a arte (moldura de quadrinho) e molduras antigas (1993, 1997 e
+ * 2003). Antes de escrever, confere se a imagem tem a diagramação esperada. O
+ * molde manual usa os retângulos marcados no painel para aquela arte.
  */
 import {
   acharArte,
+  acharCaixaBordas,
   acharTinta,
   acharTopoPR,
+  apagarContornado,
   apagarTinta,
   blurRegion,
-  cobrir,
+  bordasHorizontais,
   limparTexto,
+  linhasContornadas,
   lum,
   mediana,
   rgb,
+  textoCentralizado,
+  topoDaMoldura,
   type Ctx,
+  type LinhaAchada,
   type OpcoesDeLimpeza,
   type Quadro,
   type RGB,
 } from "./pixels";
-import type { MetaDeFace, MetaDeImpressao, MoldeManual, Ret } from "./tipos";
+import { basicoDeArteInteira, type MetaDeFace, type MetaDeImpressao, type MoldeManual, type Ret } from "./tipos";
 
 export type TextoParaDesenhar = { nome: string; tipo: string; texto: string; sabor: string };
 type Fonte = Ctx | OffscreenCanvasRenderingContext2D;
@@ -80,7 +88,17 @@ function fitLine(g: Ctx, text: string, fam: string, weight: number, capPx: numbe
  * estreita a letra até 80%, como as cartas impressas fazem com nomes longos, e
  * só então diminui o tamanho.
  */
-function escreverAjustado(g: Ctx, txt: string, x: number, base: number, fam: string, peso: number, capPx: number, maxW: number) {
+function escreverAjustado(
+  g: Ctx,
+  txt: string,
+  x: number,
+  base: number,
+  fam: string,
+  peso: number,
+  capPx: number,
+  maxW: number,
+  contorno?: number,
+) {
   const s0 = fitLine(g, txt, fam, peso, capPx, 1e9), w = g.measureText(txt).width;
   let sx = 1;
   if (w > maxW) {
@@ -90,6 +108,13 @@ function escreverAjustado(g: Ctx, txt: string, x: number, base: number, fam: str
   g.save();
   g.translate(x, base);
   g.scale(sx, 1);
+  if (contorno) {
+    // letra branca com borda preta (molduras de quadrinho)
+    g.lineJoin = "round";
+    g.strokeStyle = "#000";
+    g.lineWidth = contorno;
+    g.strokeText(txt, 0, 0);
+  }
   g.fillText(txt, 0, 0);
   g.restore();
 }
@@ -242,10 +267,32 @@ function tokenize(text: string, forceItalic = false): Token[] {
  * Caixa do texto de regras. `maxX` e `minX` são a altura da letra minúscula
  * (altura-x) maior e menor que o texto pode ter. Com `ptY`, as linhas que
  * descem abaixo do topo da caixa de P/R ficam mais curtas (`ptW`) e o texto
- * pode ir até `fundo`.
+ * pode ir até `fundo`. `topo` começa no alto da caixa em vez de centralizar na
+ * altura; `centrar` centraliza cada linha; `contorno` desenha a borda preta
+ * das letras, em fração do tamanho da fonte.
  */
-type Caixa = { x: number; w: number; y: number; h: number; maxX: number; minX: number; ptY?: number | null; ptW?: number; fundo?: number };
-type Plano = { linhas: Array<{ itens: TokenNaLinha[]; y: number }>; h: number; sep: number | null; size: number; xh: number; cabe: boolean };
+type Caixa = {
+  x: number;
+  w: number;
+  y: number;
+  h: number;
+  maxX: number;
+  minX: number;
+  ptY?: number | null;
+  ptW?: number;
+  fundo?: number;
+  topo?: boolean;
+  centrar?: boolean;
+  contorno?: number;
+};
+type Plano = {
+  linhas: Array<{ itens: TokenNaLinha[]; y: number; w: number }>;
+  h: number;
+  sep: number | null;
+  size: number;
+  xh: number;
+  cabe: boolean;
+};
 
 // O texto é dimensionado pela altura da letra minúscula, como nas cartas impressas:
 // linhas a 2 vezes essa altura. Só diminui se não couber.
@@ -281,7 +328,7 @@ function planejarTexto(g: Ctx, paras: string[], flavor: string, box: Caixa, xh: 
       }
       const gap = sp ? spW : 0;
       if (linha.length && w + gap + tw > maxW) {
-        linhas.push({ itens: linha, y });
+        linhas.push({ itens: linha, y, w });
         y += lh;
         maxW = largura(y);
         linha = [];
@@ -292,7 +339,7 @@ function planejarTexto(g: Ctx, paras: string[], flavor: string, box: Caixa, xh: 
       sp = false;
     }
     if (linha.length) {
-      linhas.push({ itens: linha, y });
+      linhas.push({ itens: linha, y, w });
       y += lh;
     }
   });
@@ -318,7 +365,7 @@ function layoutText(g: Ctx, tr: TextoParaDesenhar, box: Caixa, color: string) {
     }
   }
   const { xh, size } = plan;
-  const y0 = box.y + (emL ? 0 : Math.max(0, (box.h - plan.h) / 2));
+  const y0 = box.y + (emL || box.topo ? 0 : Math.max(0, (box.h - plan.h) / 2));
   if (plan.sep != null) {
     g.save();
     g.strokeStyle = color;
@@ -332,14 +379,22 @@ function layoutText(g: Ctx, tr: TextoParaDesenhar, box: Caixa, color: string) {
   }
   for (const linha of plan.linhas) {
     const base = y0 + linha.y + xh * 1.55; // a linha de base fica a 1,55 altura-x do topo da linha
+    // cartas de 1993 com pouco texto: cada linha centralizada, como nas impressas
+    const dx = box.centrar ? Math.max(0, (box.w - linha.w) / 2) : 0;
     for (const t of linha.itens) {
-      if (t.sym) drawSym(g, t.sym, box.x + t.x, base, size);
+      if (t.sym) drawSym(g, t.sym, box.x + dx + t.x, base, size);
       else {
         setFont(g, size, t.it);
         g.fillStyle = color;
         g.textAlign = "left";
         g.textBaseline = "alphabetic";
-        g.fillText(t.w!, box.x + t.x, base);
+        if (box.contorno) {
+          g.lineJoin = "round";
+          g.strokeStyle = "#000";
+          g.lineWidth = size * box.contorno;
+          g.strokeText(t.w!, box.x + dx + t.x, base);
+        }
+        g.fillText(t.w!, box.x + dx + t.x, base);
       }
     }
   }
@@ -414,7 +469,168 @@ function moldeModerno(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoP
     },
     color,
   );
-  trocaIdiomaRodape(g, W, H, "PT");
+}
+
+/** A arte tem diagramação especial, que o molde automático não reconhece. */
+export class ErroDeDiagramacao extends Error {
+  constructor() {
+    super("Esta arte tem uma diagramação especial e não pode ser traduzida. Escolha outra arte ou deixe em inglês.");
+    this.name = "ErroDeDiagramacao";
+  }
+}
+
+/** A carta tem as barras e caixas onde o molde espera? (moldura de quadrinho, arte que toma a carta toda etc. não têm) */
+function diagramacaoReconhecida(g: Ctx, W: number, H: number, meta: MetaDeImpressao): boolean {
+  if (meta.frame === "2015" && basicoDeArteInteira(meta))
+    // terreno básico de arte inteira: barra de tipo embaixo
+    return bordasHorizontais(g, W, H, 0.82, 0.865, 0.2, 0.8).sc > 0.7 && bordasHorizontais(g, W, H, 0.88, 0.93, 0.2, 0.8).sc > 0.7;
+  // as outras têm a barra de tipo (ou o fim da arte e o começo da caixa) no meio da carta
+  // (numa barra translúcida uma das bordas some um pouco atrás da arte)
+  const a = bordasHorizontais(g, W, H, 0.53, 0.59).sc, b = bordasHorizontais(g, W, H, 0.59, 0.65).sc;
+  return Math.max(a, b) > 0.8 && Math.min(a, b) > 0.45;
+}
+
+type TextoSolto = { nome: LinhaAchada | undefined; tipo: LinhaAchada; regras: LinhaAchada[] };
+
+/** Acha nome, linha de tipo e texto de regras escritos direto sobre a arte. Devolve null se não achar tipo e regras. */
+function acharTextoSolto(g: Ctx, W: number, H: number, meta: MetaDeImpressao): TextoSolto | null {
+  if (meta.frame !== "2015" || basicoDeArteInteira(meta)) return null;
+  const melhor = (ls: LinhaAchada[]): LinhaAchada | undefined => ls.sort((p, q) => q.n - p.n)[0];
+  const tipo = melhor(linhasContornadas(g, W, H, 0.05, 0.52, 0.8, 0.63).filter((l) => l.xa < 0.2 && l.y1 - l.y0 <= 0.03));
+  if (!tipo) return null;
+  const cand = linhasContornadas(g, W, H, 0.05, tipo.y1 + 0.004, 0.95, 0.82).filter((l) => l.xa < 0.2);
+  if (!cand.length || cand[0].y0 - tipo.y1 > 0.06) return null;
+  const regras = [cand[0]];
+  for (const l of cand.slice(1)) {
+    const ult = regras[regras.length - 1], alt = ult.y1 - ult.y0;
+    if (l.y0 - ult.y1 < alt * 1.6) regras.push(l);
+    else break;
+  }
+  if (Math.max(...regras.map((l) => l.xbTodo)) - regras[0].xa < 0.3) return null;
+  const nome = melhor(linhasContornadas(g, W, H, 0.05, 0.02, 0.78, 0.09).filter((l) => l.xa < 0.2));
+  return { nome, tipo, regras };
+}
+
+/** Texto branco com borda preta direto sobre a arte (moldura de quadrinho). */
+function moldeSolto(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoParaDesenhar, det: TextoSolto) {
+  const nSym = (info.mana.match(/\{[^}]+\}/g) || []).length;
+  const area = (l: LinhaAchada, px = 0.008, py = 0.006) =>
+    [(l.xa - px) * W, (l.y0 - py) * H, (l.xb + px) * W, (l.y1 + py) * H] as const;
+  const rg = det.regras, y0 = rg[0].y0, y1 = rg[rg.length - 1].y1, xa = rg[0].xa;
+  // primeiro apaga todo o inglês e só depois escreve: assim a arte usada para refazer o fundo nunca tem letra nova
+  if (det.nome) apagarContornado(g, ...area(det.nome), H, true, true);
+  apagarContornado(g, ...area(det.tipo), H, true, true);
+  // o bloco inteiro do texto de regras, até a ponta da linha mais comprida
+  apagarContornado(g, (xa - 0.012) * W, (y0 - 0.008) * H, Math.min(0.97, Math.max(...rg.map((l) => l.xbTodo)) + 0.03) * W, (y1 + 0.008) * H, H, true, true);
+  const linha = (l: LinhaAchada, txt: string, ate: number, capMin: number) => {
+    const cap = Math.max(capMin * H, (l.y1 - l.y0) * H * 0.9); // a linha achada vai do topo das maiúsculas até um pouco abaixo da base
+    const base = l.y0 * H + cap * 1.03;
+    g.fillStyle = "#fff";
+    g.textAlign = "left";
+    g.textBaseline = "alphabetic";
+    escreverAjustado(g, txt, l.xa * W, base, FONT_T, 700, cap, ate * W - l.xa * W, Math.max(1.5, cap * 0.22));
+  };
+  if (det.nome) linha(det.nome, tr.nome || info.nome, 0.93 - nSym * 0.055 - 0.02, 0.02);
+  linha(det.tipo, tr.tipo || info.tipo, 0.85, 0.017);
+  const lh = rg.length > 1 ? (rg[rg.length - 1].y0 - rg[0].y0) / (rg.length - 1) : (y1 - y0) * 1.25;
+  const xh = Math.min(0.017, Math.max(0.0105, lh / 2.02));
+  layoutText(
+    g,
+    tr,
+    { x: xa * W, w: (0.94 - xa) * W, y: (y0 - 0.004) * H, h: (y1 - y0 + 0.004 + lh * 0.6) * H, maxX: xh * H, minX: 0.0105 * H, topo: true, contorno: 0.16 },
+    "#fff",
+  );
+}
+
+type Faixa = [x0: number, y0: number, x1: number, y1: number];
+
+/** Uma linha de texto achada na imagem: apaga as letras antigas e escreve a nova no mesmo lugar, mesma altura e cor. */
+function trocarLinha(
+  g: Ctx,
+  W: number,
+  H: number,
+  txt: string,
+  faixa: Faixa,
+  op: { capMin?: number; capMax?: number; ate?: number; sombra?: boolean } = {},
+): boolean {
+  const t = acharTinta(g, ...faixa);
+  if (!t) return false;
+  const cap = Math.min((op.capMax || 0.03) * H, Math.max((op.capMin || 0.012) * H, t.cap));
+  const px = 0.006 * W, py = 0.005 * H;
+  const fundo = limparTexto(g, Math.max(faixa[0], t.x - px), Math.max(faixa[1], t.y - py), Math.min(faixa[2], t.x2 + px), Math.min(faixa[3], t.y2 + py), H);
+  const lf = lum(fundo || mediana(g, faixa[0], faixa[1], faixa[2] - faixa[0], faixa[3] - faixa[1]));
+  // cor das letras originais; se não der para medir, contraste com o fundo
+  const cor: RGB = t.cor && Math.abs(lum(t.cor) - lf) > 0.3 ? t.cor : t.claras ? [245, 243, 238] : [20, 20, 20];
+  const maxW = (op.ate || faixa[2]) - t.x;
+  g.textAlign = "left";
+  g.textBaseline = "alphabetic";
+  if (op.sombra && lum(cor) > 0.5) {
+    g.fillStyle = "rgba(0,0,0,.75)";
+    escreverAjustado(g, txt, t.x + 0.0018 * W, t.base + 0.0018 * W, FONT_T, 700, cap, maxW);
+  }
+  g.fillStyle = rgb(cor);
+  escreverAjustado(g, txt, t.x, t.base, FONT_T, 700, cap, maxW);
+  return true;
+}
+
+/** Terreno básico de arte inteira: nome em cima e "Terreno Básico — X" na barra de baixo. Não há caixa de texto. */
+function moldeBasico(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoParaDesenhar) {
+  const N = GEO.name, nx0 = N.x0 * W, nx1 = (N.right - 0.012) * W; // barra de nome igual à das cartas comuns
+  const antes = mediana(g, nx0, N.y0 * H, nx1 - nx0, (N.y1 - N.y0) * H), fundo = limparTexto(g, nx0, N.y0 * H, nx1, N.y1 * H, H);
+  g.fillStyle = lum(fundo || antes) > 0.5 ? "#111" : "#fff";
+  g.textAlign = "left";
+  g.textBaseline = "alphabetic";
+  escreverAjustado(g, tr.nome || info.nome, N.tx * W, N.base * H, FONT_T, 700, N.cap * H, nx1 - N.tx * W - 0.01 * W);
+  // barra de baixo: o símbolo de mana fica à esquerda e o da edição à direita
+  trocarLinha(g, W, H, tr.tipo || info.tipo, [0.18 * W, 0.842 * H, 0.85 * W, 0.892 * H], { capMin: 0.016, capMax: 0.025, ate: 0.84 * W });
+}
+
+/** Molduras de 1997 a 2014: nome, linha de tipo e caixa de texto achados na imagem. */
+function moldeClassico(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info: MetaDeFace, tr: TextoParaDesenhar) {
+  const nSym = (info.mana.match(/\{[^}]+\}/g) || []).length;
+  const arte = acharArte(g, W, H), cx = acharCaixaBordas(g, W, H);
+  if (!cx) throw new ErroDeDiagramacao();
+  const altura = cx.y1 - cx.y0, largura = cx.x1 - cx.x0;
+  if (altura < 0.18 * H || altura > 0.34 * H || largura < 0.65 * W) throw new ErroDeDiagramacao();
+  const corDaCaixa = mediana(g, cx.x0, cx.y0, largura, altura);
+  const moderna = meta.frame === "2003";
+  // nome: na moldura de 2003 fica numa barra um pouco mais baixa; na de 1997, direto na moldura, acima da arte
+  const nomeFaixa: Faixa = moderna
+    ? [0.075 * W, 0.038 * H, (0.93 - nSym * 0.052 - 0.02) * W, Math.min(0.102 * H, Math.max(0.09 * H, arte.y0 - 0.003 * H))]
+    : [0.07 * W, topoDaMoldura(g, W, H, 0.025 * H), (0.93 - nSym * 0.052 - 0.02) * W, Math.min(0.082 * H, arte.y0 - 0.003 * H)];
+  trocarLinha(g, W, H, tr.nome || info.nome, nomeFaixa, { capMin: 0.018, capMax: 0.028, sombra: !moderna });
+  // linha de tipo: entre a arte e a caixa, antes do símbolo da edição
+  const yt0 = cx.tipo0 + 0.003 * H, yt1 = cx.tipo1 - 0.002 * H;
+  // na moldura de 1997 a linha de tipo começa alinhada com a caixa de texto (manchas da textura à esquerda ficam de fora)
+  if (yt1 - yt0 > 0.015 * H)
+    trocarLinha(g, W, H, tr.tipo || info.tipo, [moderna ? 0.085 * W : Math.max(0.07 * W, cx.x0 - 0.02 * W), yt0, 0.82 * W, yt1], {
+      capMin: 0.013,
+      capMax: moderna ? 0.021 : 0.018,
+      ate: 0.83 * W,
+      sombra: !moderna,
+    });
+  // caixa de texto: apaga só as letras (a textura e a cor da caixa ficam); antes de 2003 não havia marca d'água
+  const m = 0.012 * W;
+  const fundo = limparTexto(g, cx.x0, cx.y0, cx.x1, cx.y1, H, { marca: moderna ? undefined : false });
+  const cor = lum(fundo || corDaCaixa) > 0.5 ? "#111" : "#fff";
+  // na moldura de 2003 a caixa de P/R invade o canto de baixo da caixa de texto
+  const fim = cx.y1 - 0.008 * H, ptY = info.temPT && moderna ? cx.y1 - 0.03 * H : null;
+  layoutText(
+    g,
+    tr,
+    {
+      x: cx.x0 + m,
+      w: largura - 2 * m,
+      y: cx.y0 + 0.008 * H,
+      h: (ptY || fim) - cx.y0 - 0.008 * H,
+      maxX: 0.0172 * H,
+      minX: 0.0105 * H,
+      ptY,
+      ptW: largura * 0.72,
+      fundo: fim,
+    },
+    cor,
+  );
 }
 
 /**
@@ -423,7 +639,7 @@ function moldeModerno(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoP
  * ilustração e o tipo logo abaixo.
  */
 function moldeAntigo(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoParaDesenhar) {
-  const linha = (txt: string, faixa: [number, number, number, number], capMin: number, capMax: number) => {
+  const linha = (txt: string, faixa: Faixa, capMin: number, capMax: number) => {
     const t = acharTinta(g, ...faixa);
     if (!t) return;
     const cap = Math.min(capMax * H, Math.max(capMin * H, t.cap));
@@ -447,18 +663,31 @@ function moldeAntigo(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoPa
   const arte = acharArte(g, W, H);
   linha(
     tr.nome || info.nome,
-    [0.055 * W, 0.018 * H, (0.925 - nSym * 0.052 - 0.015) * W, Math.min(0.093 * H, arte.y0 - 0.004 * H)],
+    [0.055 * W, topoDaMoldura(g, W, H, 0.028 * H), (0.925 - nSym * 0.052 - 0.015) * W, Math.min(0.093 * H, arte.y0 - 0.004 * H)],
     0.019,
     0.027,
   );
   linha(tr.tipo || info.tipo, [0.06 * W, 0.559 * H, 0.72 * W, 0.598 * H], 0.016, 0.021);
   const cx = { x0: 0.113 * W, x1: 0.897 * W, y0: 0.606 * H, y1: 0.874 * H };
-  const cor = cobrir(g, [[cx.x0, cx.y0, cx.x1 - cx.x0, cx.y1 - cx.y0]], mediana(g, 0.2 * W, 0.62 * H, 0.6 * W, 0.23 * H));
+  const corDaCaixa = mediana(g, 0.2 * W, 0.62 * H, 0.6 * W, 0.23 * H);
+  const centrado = textoCentralizado(g, cx.x0, cx.y0, cx.x1, cx.y1);
+  // apaga só as letras: a textura da caixa fica
+  const fundo = limparTexto(g, cx.x0, cx.y0, cx.x1, cx.y1, H, { marca: false });
+  const cor = lum(fundo || corDaCaixa) > 0.5 ? "#111" : "#fff";
   const m = 0.02 * W;
+  // quando a carta original tem o texto grande e centralizado, a traduzida também tem
   layoutText(
     g,
     tr,
-    { x: cx.x0 + m, w: cx.x1 - cx.x0 - 2 * m, y: cx.y0 + 0.008 * H, h: cx.y1 - cx.y0 - 0.016 * H, maxX: 0.0175 * H, minX: 0.0112 * H },
+    {
+      x: cx.x0 + m,
+      w: cx.x1 - cx.x0 - 2 * m,
+      y: cx.y0 + 0.008 * H,
+      h: cx.y1 - cx.y0 - 0.016 * H,
+      maxX: centrado ? 0.026 * H : 0.0175 * H,
+      minX: 0.0112 * H,
+      centrar: centrado,
+    },
     cor,
   );
 }
@@ -505,8 +734,29 @@ function moldeManual(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoPa
 }
 
 /**
+ * Molde automático: confere a diagramação da imagem e escolhe o desenho pela
+ * moldura. Lança `ErroDeDiagramacao` se a arte não tiver a diagramação esperada.
+ */
+function moldeAutomatico(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info: MetaDeFace, tr: TextoParaDesenhar) {
+  if (!diagramacaoReconhecida(g, W, H, meta)) {
+    const solto = acharTextoSolto(g, W, H, meta); // texto direto sobre a arte, como nas cartas de quadrinho
+    if (!solto) throw new ErroDeDiagramacao();
+    moldeSolto(g, W, H, info, tr, solto);
+    trocaIdiomaRodape(g, W, H, "PT");
+    return;
+  }
+  // rodapé das molduras antigas: só o ilustrador, sem idioma
+  if (meta.frame === "1993") return moldeAntigo(g, W, H, info, tr);
+  if (meta.frame === "1997" || meta.frame === "2003") return moldeClassico(g, W, H, meta, info, tr);
+  if (basicoDeArteInteira(meta)) moldeBasico(g, W, H, info, tr);
+  else moldeModerno(g, W, H, info, tr);
+  trocaIdiomaRodape(g, W, H, "PT");
+}
+
+/**
  * Devolve uma cópia da imagem com a tradução. `tr.sabor` só aparece se a arte
- * original tiver ambientação.
+ * original tiver ambientação. Com o molde automático, lança `ErroDeDiagramacao`
+ * quando a arte tem diagramação especial.
  */
 export async function renderizarTraducao(
   src: CanvasImageSource & { width: number; height: number },
@@ -526,8 +776,14 @@ export async function renderizarTraducao(
   const texto = { ...tr, sabor: info.sabor ? tr.sabor : "" };
   await carregarSimbolos(texto.texto, texto.sabor);
   if (molde !== "auto") moldeManual(g, W, H, info, texto, molde);
-  else if (meta.frame === "1993") moldeAntigo(g, W, H, info, texto);
-  else moldeModerno(g, W, H, info, texto);
+  else {
+    try {
+      moldeAutomatico(g, W, H, meta, info, texto);
+    } catch (e) {
+      c.width = c.height = 0;
+      throw e;
+    }
+  }
   return c;
 }
 
@@ -639,6 +895,42 @@ export function imagemDaCarta(url: string): Promise<ImageBitmap> {
       .then((b) => createImageBitmap(b));
     p.catch(() => cacheDeImagens.delete(url));
     cacheDeImagens.set(url, p);
+  }
+  return p;
+}
+
+const cacheDeConferencias = new Map<string, Promise<boolean>>();
+
+/**
+ * Confere, na imagem da frente, se o molde automático reconhece a diagramação
+ * da arte, antes de a loja prometer a tradução. Sem conseguir baixar a imagem,
+ * responde que sim: a conferência se repete na hora de desenhar.
+ */
+export function conferirDiagramacao(url: string, meta: MetaDeImpressao): Promise<boolean> {
+  let p = cacheDeConferencias.get(url);
+  if (!p) {
+    p = (async () => {
+      let bmp: ImageBitmap;
+      try {
+        bmp = await imagemDaCarta(url);
+      } catch {
+        cacheDeConferencias.delete(url);
+        return true;
+      }
+      const c = document.createElement("canvas");
+      c.width = bmp.width;
+      c.height = bmp.height;
+      const g = c.getContext("2d", { willReadFrequently: true })!;
+      g.drawImage(bmp, 0, 0);
+      try {
+        return diagramacaoReconhecida(g, c.width, c.height, meta) || acharTextoSolto(g, c.width, c.height, meta) !== null;
+      } catch {
+        return true;
+      } finally {
+        c.width = c.height = 0;
+      }
+    })();
+    cacheDeConferencias.set(url, p);
   }
   return p;
 }

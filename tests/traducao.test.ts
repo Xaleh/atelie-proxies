@@ -5,7 +5,15 @@ import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { aceitaMoldeAutomatico, chaveDoSabor, facesFisicas, moldeParaUsar, moldeSchema, type MetaDeImpressao } from "@/lib/traducao/tipos";
+import {
+  aceitaMoldeAutomatico,
+  basicoDeArteInteira,
+  chaveDoSabor,
+  facesFisicas,
+  moldeParaUsar,
+  moldeSchema,
+  type MetaDeImpressao,
+} from "@/lib/traducao/tipos";
 import { impressaoEscolhida, modoDoTexto, type CardPrint } from "@/lib/types";
 
 const dir = mkdtempSync(join(tmpdir(), "pdr-tr-"));
@@ -43,13 +51,16 @@ beforeAll(async () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("molde", () => {
-  it("só aceita o automático na moldura 2015 comum", () => {
+  it("aceita o automático na moldura 2015 e nas antigas, em cartas comuns", () => {
     expect(aceitaMoldeAutomatico(meta())).toBe(true);
-    expect(aceitaMoldeAutomatico(meta({ frame: "1997" }))).toBe(false);
-    // moldura antiga (Alpha a Mirage, 30th Edition): só no layout comum
-    expect(aceitaMoldeAutomatico(meta({ frame: "1993" }))).toBe(true);
-    expect(aceitaMoldeAutomatico(meta({ frame: "1993", layout: "transform" }))).toBe(false);
-    expect(aceitaMoldeAutomatico(meta({ frame: "1993", tipo: "Enchantment — Saga" }))).toBe(false);
+    expect(aceitaMoldeAutomatico(meta({ layout: "transform" }))).toBe(true);
+    // molduras antigas (1993, 1997 e 2003, inclusive as reimpressões retrô): só no layout comum
+    for (const frame of ["1993", "1997", "2003"]) {
+      expect(aceitaMoldeAutomatico(meta({ frame }))).toBe(true);
+      expect(aceitaMoldeAutomatico(meta({ frame, layout: "transform" }))).toBe(false);
+      expect(aceitaMoldeAutomatico(meta({ frame, tipo: "Enchantment — Saga" }))).toBe(false);
+    }
+    expect(aceitaMoldeAutomatico(meta({ frame: "future" }))).toBe(false);
     expect(aceitaMoldeAutomatico(meta({ layout: "split" }))).toBe(false);
     expect(aceitaMoldeAutomatico(meta({ tipo: "Legendary Planeswalker — Jace" }))).toBe(false);
     expect(aceitaMoldeAutomatico(meta({ tipo: "Enchantment — Saga" }))).toBe(false);
@@ -65,10 +76,19 @@ describe("molde", () => {
       fundo: "desfoque",
       corTexto: "claro",
     });
-    expect(moldeParaUsar(meta({ frame: "1997" }), manual)).toEqual(manual);
+    expect(moldeParaUsar(meta({ frame: "future" }), manual)).toEqual(manual);
     expect(moldeParaUsar(meta(), { modo: "bloqueado" })).toBeNull();
     expect(moldeParaUsar(meta(), null)).toBe("auto");
-    expect(moldeParaUsar(meta({ frame: "1997" }), null)).toBeNull();
+    expect(moldeParaUsar(meta({ frame: "1997" }), null)).toBe("auto");
+    expect(moldeParaUsar(meta({ frame: "future" }), null)).toBeNull();
+  });
+
+  it("reconhece o terreno básico de arte inteira", () => {
+    expect(basicoDeArteInteira(meta({ fullArt: true, tipo: "Basic Land — Forest" }))).toBe(true);
+    expect(basicoDeArteInteira(meta({ fullArt: true, tipo: "Basic Snow Land — Island" }))).toBe(true);
+    expect(basicoDeArteInteira(meta({ fullArt: false, tipo: "Basic Land — Forest" }))).toBe(false);
+    expect(basicoDeArteInteira(meta({ fullArt: true, tipo: "Land — Forest Plains" }))).toBe(false);
+    expect(basicoDeArteInteira(meta({ fullArt: true }))).toBe(false);
   });
 
   it("conta o verso das cartas de duas faces como carta física", () => {

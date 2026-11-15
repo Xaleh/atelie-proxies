@@ -98,7 +98,7 @@ export function EditorDeMolde({ detalhe, face, inicial }: { detalhe: DetalheDeIm
           <legend className="sr-only">Como esta arte recebe o texto em português</legend>
           {(
             [
-              ["auto", "Automático", automaticoServe ? "Usa o molde da moldura desta carta." : "O molde automático não cobre esta moldura: sem molde manual, a arte não recebe tradução."],
+              ["auto", "Automático", automaticoServe ? "Usa o molde da moldura desta carta. Se a arte tiver diagramação especial, a prévia avisa e ela precisa de molde manual." : "O molde automático não cobre esta moldura: sem molde manual, a arte não recebe tradução."],
               ["manual", "Molde manual", "Você marca os retângulos abaixo."],
               ["bloqueado", "Não traduzir esta arte", "A arte sai sempre em inglês; a loja não oferece PT nela."],
             ] as const

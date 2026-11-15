@@ -248,7 +248,15 @@ function Tile({ item, sit }: { item: CartItem; sit: Situacao }) {
           type="button"
           aria-pressed={emPt}
           disabled={!ptPossivel && !emPt}
-          title={ptPossivel ? undefined : sit.carregando ? "Verificando se existe tradução" : "Esta carta ainda não tem texto em português"}
+          title={
+            ptPossivel
+              ? undefined
+              : sit.carregando
+                ? "Verificando se existe tradução"
+                : sit.arteEspecial
+                  ? "Esta arte tem uma diagramação especial e não recebe o texto em português. Troque a arte para pedir em português."
+                  : "Esta carta ainda não tem texto em português"
+          }
           className={`min-h-11 flex-1 text-sm ${emPt ? "bg-rust font-bold text-cream" : "font-semibold text-muted"} ${ptPossivel || emPt ? "cursor-pointer" : "cursor-not-allowed opacity-40"}`}
           onClick={() => mudarIdioma(item.oracleId, "pt")}
         >
@@ -352,7 +360,7 @@ function Resumo({ emPortugues, semPt, versos, tabela, linhas }: { emPortugues: n
       {semPt > 0 && (
         <p className="text-[13px] text-paper-muted">
           {semPt} {semPt === 1 ? "carta pedida em português ainda não tem" : "cartas pedidas em português ainda não têm"} texto
-          em português nesta arte e {semPt === 1 ? "sai" : "saem"} em inglês.
+          em português nesta arte e {semPt === 1 ? "sai" : "saem"} em inglês. Trocar a arte pode resolver.
         </p>
       )}
       {quantidade > valores.maxCartasPorPedido && (

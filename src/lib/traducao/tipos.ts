@@ -3,8 +3,8 @@ import { z } from "zod";
 /**
  * Tipos e regras da tradução que valem no servidor e no navegador.
  * O texto em português é escrito sobre a arte em inglês por um "molde": o
- * automático, para as molduras de 2015 e de 1993, ou um manual, marcado no painel
- * para uma impressão específica.
+ * automático, para a moldura de 2015 e as antigas (1993, 1997 e 2003), ou um
+ * manual, marcado no painel para uma impressão específica.
  */
 
 export type FonteDaTraducao = "manual" | "arena" | "oficial";
@@ -105,15 +105,25 @@ export function chaveDoSabor(nome: string, set: string, num: string): string {
 
 const TIPOS_SEM_MOLDE = /Planeswalker|Saga|Battle|Class|Case|Siege/i;
 
+const MOLDURAS_ANTIGAS = ["1993", "1997", "2003"];
+
 /**
- * Molduras que o molde automático sabe reescrever: a moderna (2015) e a antiga
- * (1993, de Alpha a Mirage e 30th Edition), só em cartas de layout comum.
+ * Molduras que o molde automático sabe reescrever: a moderna (2015) e as
+ * antigas (1993, 1997 e 2003, inclusive as reimpressões "retrô"), estas só em
+ * cartas de layout comum. A moldura certa não basta: na hora de desenhar, o
+ * renderizador ainda confere a diagramação da imagem (arte que ocupa a carta
+ * toda, por exemplo, fica de fora).
  */
 export function aceitaMoldeAutomatico(meta: MetaDeImpressao | undefined | null): boolean {
   if (!meta || TIPOS_SEM_MOLDE.test(meta.tipo)) return false;
   if (meta.frame === "2015") return ["normal", "transform", "modal_dfc"].includes(meta.layout);
-  if (meta.frame === "1993") return meta.layout === "normal";
+  if (MOLDURAS_ANTIGAS.includes(meta.frame)) return meta.layout === "normal";
   return false;
+}
+
+/** Terreno básico de arte inteira: o nome fica em cima e o tipo numa barra embaixo, sem caixa de texto. */
+export function basicoDeArteInteira(meta: MetaDeImpressao): boolean {
+  return meta.fullArt && /\bBasic\b.*\bLand\b/i.test(meta.tipo);
 }
 
 /**
