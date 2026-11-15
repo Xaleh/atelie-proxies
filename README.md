@@ -8,9 +8,9 @@ painel em `/admin`.
 ## O que já funciona
 
 - **Loja:** página inicial e montador com busca por nome (inglês ou português),
-  colagem de lista de deck, troca de arte (clicando na carta) e seletor EN/PT
-  por carta. A janela de artes traz todas as impressões da carta e tem um
-  filtro por coleção, pelo nome ou pela sigla.
+  colagem de lista de deck, troca de arte (clicando na carta; a janela traz
+  todas as impressões e filtra por coleção, pelo nome ou pela sigla) e seletor EN/PT
+  por carta.
 - **Pedido:** fechamento sem cadastro, preço por faixa de quantidade calculado
   no servidor, página de acompanhamento em `/pedido/<token>`.
 - **Pagamento:** Pix copia-e-cola com QR (confirmado à mão no painel) e
