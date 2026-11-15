@@ -199,7 +199,8 @@ function Tile({ item, sit }: { item: CartItem; sit: Situacao }) {
 
   return (
     <article className="panel flex min-w-0 flex-col gap-2.5 rounded-[14px] p-3">
-      <div className="group relative">
+      {/* com o mouse parado em cima (ou o dedo segurando), a carta aparece ampliada */}
+      <div className="group relative" data-lupa>
         <CartaPrevia
           url={print.image}
           alt={`Carta ${nomePt && emPt ? nomePt : item.name}`}
