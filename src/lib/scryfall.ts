@@ -46,7 +46,7 @@ type ScryfallCard = ScryfallFace & {
   card_faces?: ScryfallFace[];
 };
 
-type ScryfallList = { data?: ScryfallCard[]; has_more?: boolean; not_found?: Array<{ name?: string }> };
+type ScryfallList = { data?: ScryfallCard[]; has_more?: boolean; total_cards?: number; not_found?: Array<{ name?: string }> };
 
 /** As faces de uma carta: as de card_faces ou, sem elas, a própria carta. */
 function facesDaCarta(card: ScryfallCard): ScryfallFace[] {
@@ -106,8 +106,14 @@ async function searchBruta(q: string, opts: OpcoesDeBusca = {}): Promise<Scryfal
   return (await paginaDaBusca(q, opts, 1)).cards;
 }
 
-/** Uma página da busca (até 175 cartas) e se existem mais páginas depois dela. */
-async function paginaDaBusca(q: string, opts: OpcoesDeBusca, pagina: number): Promise<{ cards: ScryfallCard[]; temMais: boolean }> {
+const CARTAS_POR_PAGINA = 175;
+
+/** Uma página da busca (até 175 cartas), se existem mais páginas depois dela e o total de cartas da busca. */
+async function paginaDaBusca(
+  q: string,
+  opts: OpcoesDeBusca,
+  pagina: number,
+): Promise<{ cards: ScryfallCard[]; temMais: boolean; total: number }> {
   const params = new URLSearchParams({ q, unique: opts.unique ?? "cards", order: opts.order ?? "name" });
   if (opts.dir) params.set("dir", opts.dir);
   if (pagina > 1) params.set("page", String(pagina));
@@ -116,22 +122,28 @@ async function paginaDaBusca(q: string, opts: OpcoesDeBusca, pagina: number): Pr
     next: { revalidate: UM_DIA },
   });
   // 404 = nenhuma carta; 400 = o Scryfall não entendeu o texto digitado.
-  if (res.status === 404 || res.status === 400) return { cards: [], temMais: false };
+  if (res.status === 404 || res.status === 400) return { cards: [], temMais: false, total: 0 };
   if (!res.ok) throw new Error(`Scryfall respondeu ${res.status}`);
   const json = (await res.json()) as ScryfallList;
-  return { cards: json.data ?? [], temMais: Boolean(json.has_more) };
+  const cards = json.data ?? [];
+  return { cards, temMais: Boolean(json.has_more), total: json.total_cards ?? cards.length };
 }
 
-/** Todas as páginas de uma busca, com a pausa que o Scryfall pede entre as chamadas. */
+/**
+ * Todas as páginas de uma busca. A primeira diz quantas cartas existem; as
+ * outras saem uma a cada 100 ms (o intervalo que o Scryfall pede), sem esperar
+ * a anterior responder, para a carta com mais de mil impressões não demorar.
+ */
 async function searchCompleta(q: string, opts: OpcoesDeBusca, maxPaginas: number): Promise<CardPrint[]> {
-  const todas: ScryfallCard[] = [];
-  for (let pagina = 1; pagina <= maxPaginas; pagina++) {
-    if (pagina > 1) await pausa(100);
-    const { cards, temMais } = await paginaDaBusca(q, opts, pagina);
-    todas.push(...cards);
-    if (!temMais) break;
-  }
-  return todas.map(toPrint).filter((p): p is CardPrint => p !== null);
+  const primeira = await paginaDaBusca(q, opts, 1);
+  const paginas = primeira.temMais ? Math.min(maxPaginas, Math.max(2, Math.ceil(primeira.total / CARTAS_POR_PAGINA))) : 1;
+  const resto = await Promise.all(
+    Array.from({ length: Math.max(0, paginas - 1) }, async (_, i) => {
+      await pausa(100 * (i + 1));
+      return (await paginaDaBusca(q, opts, i + 2)).cards;
+    }),
+  );
+  return [...primeira.cards, ...resto.flat()].map(toPrint).filter((p): p is CardPrint => p !== null);
 }
 
 type Identificador = { name: string } | { oracle_id: string } | { id: string };
