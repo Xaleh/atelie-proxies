@@ -46,7 +46,7 @@ type ScryfallCard = ScryfallFace & {
   card_faces?: ScryfallFace[];
 };
 
-type ScryfallList = { data?: ScryfallCard[]; not_found?: Array<{ name?: string }> };
+type ScryfallList = { data?: ScryfallCard[]; has_more?: boolean; total_cards?: number; not_found?: Array<{ name?: string }> };
 
 /** As faces de uma carta: as de card_faces ou, sem elas, a própria carta. */
 function facesDaCarta(card: ScryfallCard): ScryfallFace[] {
@@ -103,17 +103,55 @@ async function search(q: string, opts: OpcoesDeBusca = {}): Promise<CardPrint[]>
 }
 
 async function searchBruta(q: string, opts: OpcoesDeBusca = {}): Promise<ScryfallCard[]> {
+  return (await paginaDaBusca(q, opts, 1)).cards;
+}
+
+const CARTAS_POR_PAGINA = 175;
+
+/** Uma página da busca (até 175 cartas), se existem mais páginas depois dela e o total de cartas da busca. */
+async function paginaDaBusca(
+  q: string,
+  opts: OpcoesDeBusca,
+  pagina: number,
+): Promise<{ cards: ScryfallCard[]; temMais: boolean; total: number }> {
   const params = new URLSearchParams({ q, unique: opts.unique ?? "cards", order: opts.order ?? "name" });
   if (opts.dir) params.set("dir", opts.dir);
+  if (pagina > 1) params.set("page", String(pagina));
   const res = await fetch(`${API}/cards/search?${params}`, {
     headers: HEADERS,
     next: { revalidate: UM_DIA },
   });
   // 404 = nenhuma carta; 400 = o Scryfall não entendeu o texto digitado.
-  if (res.status === 404 || res.status === 400) return [];
+  if (res.status === 404 || res.status === 400) return { cards: [], temMais: false, total: 0 };
   if (!res.ok) throw new Error(`Scryfall respondeu ${res.status}`);
   const json = (await res.json()) as ScryfallList;
-  return json.data ?? [];
+  const cards = json.data ?? [];
+  return { cards, temMais: Boolean(json.has_more), total: json.total_cards ?? cards.length };
+}
+
+/**
+ * Intervalo entre as páginas de uma mesma busca. O Scryfall aceita até 10
+ * chamadas por segundo e bloqueia o servidor por uns minutos quando passa
+ * disso (a busca de cartas do site inteiro para junto), então fica bem abaixo.
+ */
+const PAUSA_ENTRE_PAGINAS = 250;
+
+/**
+ * Todas as páginas de uma busca. A primeira diz quantas cartas existem; as
+ * outras saem uma a cada 250 ms, sem esperar a anterior responder, para a
+ * carta com mais de mil impressões não demorar (uma depois da outra, a
+ * Floresta levava 15 s).
+ */
+async function searchCompleta(q: string, opts: OpcoesDeBusca, maxPaginas: number): Promise<CardPrint[]> {
+  const primeira = await paginaDaBusca(q, opts, 1);
+  const paginas = primeira.temMais ? Math.min(maxPaginas, Math.max(2, Math.ceil(primeira.total / CARTAS_POR_PAGINA))) : 1;
+  const resto = await Promise.all(
+    Array.from({ length: Math.max(0, paginas - 1) }, async (_, i) => {
+      await pausa(PAUSA_ENTRE_PAGINAS * (i + 1));
+      return (await paginaDaBusca(q, opts, i + 2)).cards;
+    }),
+  );
+  return [...primeira.cards, ...resto.flat()].map(toPrint).filter((p): p is CardPrint => p !== null);
 }
 
 type Identificador = { name: string } | { oracle_id: string } | { id: string };
@@ -277,13 +315,19 @@ export async function buscarPorNomes(
   return { entries: comPortugues(found, pts), notFound };
 }
 
-/** Todas as artes de uma carta, em inglês e em português, da mais nova para a mais antiga. */
+/**
+ * Páginas de artes buscadas no máximo: 175 por página, o bastante para os
+ * terrenos básicos, que passam de mil impressões.
+ */
+const MAX_PAGINAS_DE_ARTES = 12;
+
+/**
+ * Todas as artes de uma carta, em inglês e em português, da mais nova para a
+ * mais antiga. Busca todas as páginas, para o filtro por coleção da janela de
+ * artes alcançar também as coleções antigas.
+ */
 export async function buscarImpressoes(oracleId: string): Promise<CardPrint[]> {
-  return search(`oracleid:${oracleId} (lang:en or lang:pt)`, {
-    unique: "prints",
-    order: "released",
-    dir: "desc",
-  });
+  return searchCompleta(`oracleid:${oracleId} (lang:en or lang:pt)`, { unique: "prints", order: "released", dir: "desc" }, MAX_PAGINAS_DE_ARTES);
 }
 
 export const HOSTS_DE_IMAGEM = ["cards.scryfall.io"];

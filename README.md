@@ -8,7 +8,8 @@ painel em `/admin`.
 ## O que já funciona
 
 - **Loja:** página inicial e montador com busca por nome (inglês ou português),
-  colagem de lista de deck, troca de arte (clicando na carta) e seletor EN/PT
+  colagem de lista de deck, troca de arte (clicando na carta; a janela traz
+  todas as impressões e filtra por coleção, pelo nome ou pela sigla) e seletor EN/PT
   por carta.
 - **Lupa:** com o mouse parado em cima de uma carta, ela aparece ampliada ao
   lado do cursor; no celular, segurar o dedo um segundo abre a carta no meio
