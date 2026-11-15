@@ -1,9 +1,9 @@
 /**
  * Escreve a tradução sobre a arte em inglês, num canvas do navegador.
  * O molde automático é o do site de produção do ateliê, portado sem mudar as
- * medidas: moldura moderna (2015), terreno básico de arte inteira, texto
- * solto sobre a arte (moldura de quadrinho) e molduras antigas (1993, 1997 e
- * 2003). Antes de escrever, confere se a imagem tem a diagramação esperada. O
+ * medidas: moldura moderna (2015), aventura, terreno básico de arte inteira,
+ * texto solto sobre a arte (moldura de quadrinho) e molduras antigas (1993,
+ * 1997 e 2003). Antes de escrever, confere se a imagem tem a diagramação esperada. O
  * molde manual usa os retângulos marcados no painel para aquela arte.
  */
 import {
@@ -12,6 +12,7 @@ import {
   acharTinta,
   acharTopoPR,
   apagarContornado,
+  apagarFio,
   apagarTinta,
   blurRegion,
   bordasHorizontais,
@@ -28,9 +29,11 @@ import {
   type Quadro,
   type RGB,
 } from "./pixels";
-import { basicoDeArteInteira, type MetaDeFace, type MetaDeImpressao, type MoldeManual, type Ret } from "./tipos";
+import { basicoDeArteInteira, ehAventura, type MetaDeFace, type MetaDeImpressao, type MoldeManual, type Ret } from "./tipos";
 
-export type TextoParaDesenhar = { nome: string; tipo: string; texto: string; sabor: string };
+type TextoDaParte = { nome: string; tipo: string; texto: string; sabor: string };
+/** Nas cartas de aventura, `aventura` leva o texto da página esquerda do livro. */
+export type TextoParaDesenhar = TextoDaParte & { aventura?: TextoDaParte };
 type Fonte = Ctx | OffscreenCanvasRenderingContext2D;
 
 // Fontes livres: Crimson Pro (títulos e regras) e Inter (rodapé).
@@ -405,7 +408,7 @@ function layoutText(g: Ctx, tr: TextoParaDesenhar, box: Caixa, color: string) {
  * letras em inglês: a arte vista através da caixa translúcida, a textura e a
  * marca d'água pequena continuam.
  */
-function moldeModerno(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoParaDesenhar) {
+function moldeModerno(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info: MetaDeFace, tr: TextoParaDesenhar) {
   const N = GEO.name, nSym = (info.mana.match(/\{[^}]+\}/g) || []).length;
   const nx0 = N.x0 * W, nx1 = (N.right - nSym * N.sym - 0.012) * W, ny0 = N.y0 * H, ny1 = N.y1 * H;
   // tira o texto antigo da barra e devolve a cor do texto novo
@@ -423,6 +426,7 @@ function moldeModerno(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoP
   const Ty = GEO.type, yx0 = Ty.x0 * W, yx1 = Ty.x1 * W, yy0 = Ty.y0 * H, yy1 = Ty.y1 * H;
   g.fillStyle = bar(yx0, yy0, yx1 - yx0, yy1 - yy0);
   escreverAjustado(g, tr.tipo || info.tipo, Ty.tx * W, Ty.base * H, FONT_T, 700, Ty.cap * H, yx1 - Ty.tx * W - 0.01 * W);
+  if (ehAventura(meta) && tr.aventura) return moldeAventura(g, W, H, meta, tr, tr.aventura, bar);
   // caixa de texto
   const T = GEO.text, tx0 = T.x0 * W, tx1 = T.x1 * W, ty0 = T.y0 * H, ty1 = T.y1 * H, pt = info.temPT;
   const col = mediana(g, tx0, ty0, tx1 - tx0, (T.ptTop - T.y0) * H);
@@ -468,6 +472,77 @@ function moldeModerno(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoP
       fundo: T.fundo * H,
     },
     color,
+  );
+}
+
+// Aventura (moldura de 2015): a caixa de texto é um livro aberto. Página da esquerda = aventura
+// (faixa com nome e custo, faixa com o tipo e o texto); página da direita = texto da criatura, com o P/R embaixo.
+const GEO_AV = {
+  nome: { x0: 0.075, y0: 0.634, y1: 0.669, tx: 0.085, base: 0.6615, cap: 0.0185, right: 0.476, sym: 0.041 },
+  tipo: { x0: 0.075, y0: 0.675, y1: 0.712, x1: 0.478, tx: 0.085, base: 0.7025, cap: 0.0175 },
+  esq: { x0: 0.07, y0: 0.716, x1: 0.484, y1: 0.915 },
+  dir: { x0: 0.51, y0: 0.632, x1: 0.93, y1: 0.915, ptTop: 0.885, ptLeft: 0.768 },
+};
+
+function moldeAventura(
+  g: Ctx,
+  W: number,
+  H: number,
+  meta: MetaDeImpressao,
+  tr: TextoParaDesenhar,
+  trAv: TextoDaParte,
+  bar: (x: number, y: number, w: number, h: number) => string,
+) {
+  const A = GEO_AV, cr = meta.faces[0], av = meta.faces[1];
+  // faixa do nome da aventura (o custo de mana à direita fica como está)
+  const nSym = (av.mana.match(/\{[^}]+\}/g) || []).length, nx1 = (A.nome.right - nSym * A.nome.sym - 0.008) * W;
+  g.fillStyle = bar(A.nome.x0 * W, A.nome.y0 * H, nx1 - A.nome.x0 * W, (A.nome.y1 - A.nome.y0) * H);
+  g.textAlign = "left";
+  g.textBaseline = "alphabetic";
+  escreverAjustado(g, trAv.nome || av.nome, A.nome.tx * W, A.nome.base * H, FONT_T, 700, A.nome.cap * H, nx1 - A.nome.tx * W - 0.006 * W);
+  // faixa do tipo da aventura
+  g.fillStyle = bar(A.tipo.x0 * W, A.tipo.y0 * H, (A.tipo.x1 - A.tipo.x0) * W, (A.tipo.y1 - A.tipo.y0) * H);
+  escreverAjustado(g, trAv.tipo || av.tipo, A.tipo.tx * W, A.tipo.base * H, FONT_T, 700, A.tipo.cap * H, (A.tipo.x1 - A.tipo.tx - 0.008) * W);
+  // página da esquerda: texto da aventura
+  const E = A.esq;
+  apagarFio(g, (E.x0 + 0.02) * W, E.y0 * H, (E.x1 - 0.02) * W, E.y1 * H, H);
+  const fe = limparTexto(g, E.x0 * W, E.y0 * H, E.x1 * W, E.y1 * H, H, { marca: false });
+  layoutText(
+    g,
+    { ...trAv, sabor: trAv.sabor || "" },
+    { x: (E.x0 + 0.013) * W, w: (E.x1 - E.x0 - 0.022) * W, y: (E.y0 + 0.004) * H, h: (E.y1 - E.y0 - 0.01) * H, maxX: 0.0145 * H, minX: 0.0095 * H },
+    lum(fe || [230, 220, 210]) > 0.5 ? "#111" : "#fff",
+  );
+  // página da direita: texto da criatura, em L em volta do P/R
+  const D = A.dir, pt = cr.temPT, ptY = D.ptTop * H;
+  const rects: Quadro[] = pt
+    ? [
+        [D.x0 * W, D.y0 * H, (D.x1 - D.x0) * W, ptY - D.y0 * H],
+        [D.x0 * W, ptY, (D.ptLeft - D.x0) * W, D.y1 * H - ptY],
+      ]
+    : [[D.x0 * W, D.y0 * H, (D.x1 - D.x0) * W, (D.y1 - D.y0) * H]];
+  apagarFio(g, (D.x0 + 0.03) * W, D.y0 * H, (D.x1 - 0.02) * W, ptY, H);
+  let fd: RGB | null = null;
+  rects.forEach((r, i) => {
+    const f = limparTexto(g, r[0], r[1], r[0] + r[2], r[1] + r[3], H, { marca: false });
+    if (i === 0) fd = f;
+  });
+  const x = (D.x0 + 0.022) * W, top = (D.y0 + 0.006) * H;
+  layoutText(
+    g,
+    tr,
+    {
+      x,
+      w: (D.x1 - D.x0 - 0.03) * W,
+      y: top,
+      h: (pt ? ptY - 0.004 * H : D.y1 * H) - top,
+      maxX: 0.0145 * H,
+      minX: 0.0095 * H,
+      ptY: pt ? ptY - 0.004 * H : null,
+      ptW: (D.ptLeft - 0.012) * W - x,
+      fundo: (D.y1 - 0.01) * H,
+    },
+    lum(fd || [230, 220, 210]) > 0.5 ? "#111" : "#fff",
   );
 }
 
@@ -749,7 +824,7 @@ function moldeAutomatico(g: Ctx, W: number, H: number, meta: MetaDeImpressao, in
   if (meta.frame === "1993") return moldeAntigo(g, W, H, info, tr);
   if (meta.frame === "1997" || meta.frame === "2003") return moldeClassico(g, W, H, meta, info, tr);
   if (basicoDeArteInteira(meta)) moldeBasico(g, W, H, info, tr);
-  else moldeModerno(g, W, H, info, tr);
+  else moldeModerno(g, W, H, meta, info, tr);
   trocaIdiomaRodape(g, W, H, "PT");
 }
 
@@ -772,9 +847,13 @@ export async function renderizarTraducao(
   c.height = H;
   const g = c.getContext("2d", { willReadFrequently: true })!;
   g.drawImage(src, 0, 0);
-  const info = meta.faces[face] ?? meta.faces[0];
-  const texto = { ...tr, sabor: info.sabor ? tr.sabor : "" };
-  await carregarSimbolos(texto.texto, texto.sabor);
+  const aventura = ehAventura(meta);
+  // na aventura a imagem é uma só e a parte 0 (criatura) dá o nome e o tipo da carta
+  const info = (aventura ? meta.faces[0] : meta.faces[face]) ?? meta.faces[0];
+  const texto: TextoParaDesenhar = { nome: tr.nome, tipo: tr.tipo, texto: tr.texto, sabor: info.sabor ? tr.sabor : "" };
+  if (aventura && tr.aventura) texto.aventura = { ...tr.aventura, sabor: meta.faces[1].sabor ? tr.aventura.sabor : "" };
+  if (aventura && molde === "auto" && !texto.aventura) throw new Error("Falta a tradução de uma das duas partes desta carta de aventura.");
+  await carregarSimbolos(texto.texto, texto.sabor, texto.aventura?.texto ?? "", texto.aventura?.sabor ?? "");
   if (molde !== "auto") moldeManual(g, W, H, info, texto, molde);
   else {
     try {

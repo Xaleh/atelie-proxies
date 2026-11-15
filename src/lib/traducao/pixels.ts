@@ -740,3 +740,32 @@ export function textoCentralizado(g: Ctx, x0: number, y0: number, x1: number, y1
     return false;
   }
 }
+
+/** Tira o fio que separa o texto da ambientação (a linha nova é desenhada no lugar certo depois). */
+export function apagarFio(g: Ctx, x0: number, y0: number, x1: number, y1: number, H: number) {
+  x0 = Math.round(x0);
+  y0 = Math.round(y0);
+  const w = Math.round(x1 - x0), h = Math.round(y1 - y0);
+  const img = g.getImageData(x0, y0, w, h), d = img.data, L = luzes(d, w * h);
+  const m = Math.max(2, Math.round(0.004 * H)), fio: number[] = [];
+  for (let y = m; y < h - m; y++) {
+    let n = 0;
+    for (let x = 0; x < w; x++) {
+      const v = L[y * w + x], ref = (L[(y - m) * w + x] + L[(y + m) * w + x]) / 2;
+      if (Math.abs(v - ref) > 0.05) n++;
+    }
+    if (n > w * 0.55) fio.push(y);
+  }
+  if (!fio.length) return;
+  for (const y of fio)
+    for (let x = 0; x < w; x++) {
+      // a linha do fio vira a mistura das linhas logo acima e logo abaixo dele
+      let a = y - 1;
+      while (fio.includes(a) && a > 0) a--;
+      let b = y + 1;
+      while (fio.includes(b) && b < h - 1) b++;
+      const t = (y - a) / (b - a);
+      for (let c = 0; c < 3; c++) d[(y * w + x) * 4 + c] = d[(a * w + x) * 4 + c] * (1 - t) + d[(b * w + x) * 4 + c] * t;
+    }
+  g.putImageData(img, x0, y0);
+}

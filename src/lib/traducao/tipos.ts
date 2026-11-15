@@ -108,15 +108,33 @@ const TIPOS_SEM_MOLDE = /Planeswalker|Saga|Battle|Class|Case|Siege/i;
 const MOLDURAS_ANTIGAS = ["1993", "1997", "2003"];
 
 /**
- * Molduras que o molde automático sabe reescrever: a moderna (2015) e as
- * antigas (1993, 1997 e 2003, inclusive as reimpressões "retrô"), estas só em
- * cartas de layout comum. A moldura certa não basta: na hora de desenhar, o
+ * Carta de aventura: uma imagem só, com dois textos. A parte 0 é a criatura
+ * (ou outra permanente) e a parte 1 é a aventura, na página esquerda do livro.
+ */
+export function ehAventura(meta: MetaDeImpressao | undefined | null): boolean {
+  return meta?.layout === "adventure" && meta.faces.length > 1;
+}
+
+/**
+ * Nomes em inglês dos textos que uma face física leva. Quase sempre é um só;
+ * na aventura são dois, e os dois precisam de tradução para a carta sair em
+ * português.
+ */
+export function nomesDaFace(meta: MetaDeImpressao | undefined | null, face: number, padrao: string): string[] {
+  if (meta && ehAventura(meta)) return [meta.faces[0].nome, meta.faces[1].nome];
+  return [meta?.faces[face]?.nome ?? padrao];
+}
+
+/**
+ * Molduras que o molde automático sabe reescrever: a moderna (2015, inclusive
+ * as aventuras) e as antigas (1993, 1997 e 2003, inclusive as reimpressões
+ * "retrô"), estas só em cartas de layout comum. A moldura certa não basta: na hora de desenhar, o
  * renderizador ainda confere a diagramação da imagem (arte que ocupa a carta
  * toda, por exemplo, fica de fora).
  */
 export function aceitaMoldeAutomatico(meta: MetaDeImpressao | undefined | null): boolean {
   if (!meta || TIPOS_SEM_MOLDE.test(meta.tipo)) return false;
-  if (meta.frame === "2015") return ["normal", "transform", "modal_dfc"].includes(meta.layout);
+  if (meta.frame === "2015") return ["normal", "transform", "modal_dfc", "adventure"].includes(meta.layout);
   if (MOLDURAS_ANTIGAS.includes(meta.frame)) return meta.layout === "normal";
   return false;
 }

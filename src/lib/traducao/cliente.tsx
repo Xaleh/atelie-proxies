@@ -1,8 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useSyncExternalStore } from "react";
+import type { TextoParaDesenhar } from "./render";
 import type { PedidoDeTraducao, RespostaDeTraducao } from "./servidor";
-import { chaveDoMolde, chaveDoNome, chaveDoSabor, moldeParaUsar, type MetaDeImpressao, type Molde, type Traducao } from "./tipos";
+import {
+  chaveDoMolde,
+  chaveDoNome,
+  chaveDoSabor,
+  ehAventura,
+  moldeParaUsar,
+  nomesDaFace,
+  type MetaDeImpressao,
+  type Molde,
+  type Traducao,
+} from "./tipos";
 
 /**
  * Traduções e moldes buscados pelo navegador, guardados enquanto a página
@@ -53,6 +64,30 @@ async function pedir(faces: PedidoDeTraducao[]) {
   avisar();
 }
 
+/**
+ * Pedidos de tradução de uma face física. Quase sempre é um; a carta de
+ * aventura pede dois, a criatura e a aventura (esta como parte 1).
+ */
+export function pedidosDaFace(p: {
+  oracleId: string;
+  meta: MetaDeImpressao | undefined | null;
+  face: number;
+  /** Nome em inglês da face, usado quando a impressão veio sem os dados das faces. */
+  nome: string;
+  set: string;
+  num: string;
+  printId: string;
+}): PedidoDeTraducao[] {
+  return nomesDaFace(p.meta, p.face, p.nome).map((nome, i) => ({
+    oracleId: p.oracleId,
+    nome,
+    set: p.set,
+    num: p.num,
+    printId: p.printId,
+    face: p.face + i,
+  }));
+}
+
 /** Esquece o que já foi buscado; usado no painel depois de salvar. */
 export function esquecerTraducoes() {
   traducoes.clear();
@@ -72,6 +107,14 @@ export type Consulta = {
     set: string,
     num: string,
   ) => { nome: string; tipo: string; texto: string; sabor: string } | null;
+  /**
+   * Tudo o que uma face física leva, pronto para desenhar. Na carta de
+   * aventura junta a criatura e a aventura; faltando uma das duas, devolve
+   * null, porque a carta não pode sair metade em cada idioma.
+   */
+  textoDaFace: (meta: MetaDeImpressao | undefined | null, face: number, nome: string, set: string, num: string) => TextoParaDesenhar | null;
+  /** Alguma tradução da face ainda está sendo buscada. */
+  buscando: (meta: MetaDeImpressao | undefined | null, face: number, nome: string) => boolean;
   /** Molde que vale para a face, ou null se a arte não aceita tradução. */
   moldeQueVale: (printId: string, face: number, meta: MetaDeImpressao | undefined) => ReturnType<typeof moldeParaUsar>;
 };
@@ -93,16 +136,24 @@ export function useTraducoes(faces: PedidoDeTraducao[]): Consulta {
 
   return useMemo<Consulta>(() => {
     void v;
+    const textoPara: Consulta["textoPara"] = (nome, set, num) => {
+      const t = traducoes.get(chaveDoNome(nome));
+      if (!t) return null;
+      const arena = sabores.get(chaveDoSabor(nome, set, num));
+      const sabor = t.fonte === "manual" && t.sabor ? t.sabor : (arena ?? t.sabor ?? "");
+      return { nome: t.nome, tipo: t.tipo, texto: t.texto, sabor };
+    };
     return {
       traducao: (nome) => traducoes.get(chaveDoNome(nome)),
       molde: (printId, face) => moldes.get(chaveDoMolde(printId, face)),
-      textoPara: (nome, set, num) => {
-        const t = traducoes.get(chaveDoNome(nome));
-        if (!t) return null;
-        const arena = sabores.get(chaveDoSabor(nome, set, num));
-        const sabor = t.fonte === "manual" && t.sabor ? t.sabor : (arena ?? t.sabor ?? "");
-        return { nome: t.nome, tipo: t.tipo, texto: t.texto, sabor };
+      textoPara,
+      textoDaFace: (meta, face, nome, set, num) => {
+        const [principal, aventura] = nomesDaFace(meta, face, nome).map((n) => textoPara(n, set, num));
+        if (!principal) return null;
+        if (!ehAventura(meta)) return principal;
+        return aventura ? { ...principal, aventura } : null;
       },
+      buscando: (meta, face, nome) => nomesDaFace(meta, face, nome).some((n) => traducoes.get(chaveDoNome(n)) === undefined),
       moldeQueVale: (printId, face, meta) => moldeParaUsar(meta, moldes.get(chaveDoMolde(printId, face))),
     };
   }, [v]);

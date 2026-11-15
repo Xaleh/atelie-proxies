@@ -3,8 +3,8 @@
 import { useMemo, useRef, useState } from "react";
 import { CartaPrevia } from "@/components/CartaPrevia";
 import type { DetalheDeImpressao } from "@/lib/print/lote";
-import { esquecerTraducoes, useTraducoes } from "@/lib/traducao/cliente";
-import { aceitaMoldeAutomatico, type Molde, type MoldeManual, type Ret } from "@/lib/traducao/tipos";
+import { esquecerTraducoes, pedidosDaFace, useTraducoes } from "@/lib/traducao/cliente";
+import { aceitaMoldeAutomatico, ehAventura, type Molde, type MoldeManual, type Ret } from "@/lib/traducao/tipos";
 
 type Campo = "nome" | "tipo" | "texto";
 const CAMPOS: Array<[Campo, string]> = [
@@ -31,6 +31,11 @@ const EXEMPLO = {
   sabor: "",
 };
 
+const EXEMPLO_DE_AVENTURA = {
+  ...EXEMPLO,
+  aventura: { nome: "Nome da Aventura", tipo: "Feitiço — Aventura", texto: "Compre um card.", sabor: "" },
+};
+
 const limitar = (n: number) => Math.max(0, Math.min(1, n));
 
 export function EditorDeMolde({ detalhe, face, inicial }: { detalhe: DetalheDeImpressao; face: number; inicial: Molde | null }) {
@@ -48,12 +53,12 @@ export function EditorDeMolde({ detalhe, face, inicial }: { detalhe: DetalheDeIm
   const pedidos = useMemo(
     () =>
       detalhe.oracleId
-        ? [{ oracleId: detalhe.oracleId, nome: nomeEn, set: detalhe.set, num: detalhe.collectorNumber, printId: detalhe.id, face }]
+        ? pedidosDaFace({ oracleId: detalhe.oracleId, meta, face, nome: nomeEn, set: detalhe.set, num: detalhe.collectorNumber, printId: detalhe.id })
         : [],
-    [detalhe, nomeEn, face],
+    [detalhe, meta, nomeEn, face],
   );
   const t = useTraducoes(pedidos);
-  const tr = t.textoPara(nomeEn, detalhe.set, detalhe.collectorNumber) ?? EXEMPLO;
+  const tr = t.textoDaFace(meta, face, nomeEn, detalhe.set, detalhe.collectorNumber) ?? (ehAventura(meta) ? EXEMPLO_DE_AVENTURA : EXEMPLO);
   const automaticoServe = aceitaMoldeAutomatico(meta);
   const moldeDaPrevia = modo === "manual" ? manual : modo === "auto" && automaticoServe ? "auto" : null;
 
