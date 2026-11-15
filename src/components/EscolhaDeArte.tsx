@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { colecoesDasArtes, filtrarPorColecao, rotuloDaColecao } from "@/lib/colecoes";
 import type { CardPrint } from "@/lib/types";
 
 /**
  * Janela com todas as artes de uma carta, em inglês e em português. Usada na
  * loja (a cliente troca a arte do pedido) e na produção (o ateliê troca a arte
- * de uma carta do lote). Escolher uma arte fecha a janela.
+ * de uma carta do lote). Um campo filtra as artes pela coleção. Escolher uma
+ * arte fecha a janela.
  */
 export function EscolhaDeArte({
   oracleId,
@@ -28,6 +30,11 @@ export function EscolhaDeArte({
   const ref = useRef<HTMLDialogElement>(null);
   const [prints, setPrints] = useState<CardPrint[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [colecao, setColecao] = useState("");
+  const id = useId();
+  const colecoes = useMemo(() => colecoesDasArtes(prints ?? []), [prints]);
+  const visiveis = useMemo(() => filtrarPorColecao(prints ?? [], colecao), [prints, colecao]);
+  const filtrando = colecao.trim() !== "";
 
   useEffect(() => {
     ref.current?.showModal();
@@ -58,13 +65,52 @@ export function EscolhaDeArte({
         </button>
       </div>
       {children && <div className="border-b border-line px-5 py-3">{children}</div>}
+      {/* com uma coleção só não há o que filtrar */}
+      {colecoes.length > 1 && (
+        <div className="flex flex-wrap items-end gap-x-3 gap-y-2 border-b border-line px-5 py-3">
+          <div className="min-w-0 flex-[1_1_260px]">
+            <label htmlFor={`${id}-colecao`} className="label">
+              Filtrar por coleção
+            </label>
+            <input
+              id={`${id}-colecao`}
+              type="search"
+              list={`${id}-colecoes`}
+              autoComplete="off"
+              spellCheck={false}
+              className="field"
+              placeholder="Nome ou sigla (ex.: Dominaria, DOM)"
+              value={colecao}
+              onChange={(e) => setColecao(e.target.value)}
+            />
+            <datalist id={`${id}-colecoes`}>
+              {colecoes.map((c) => (
+                <option key={c.codigo} value={rotuloDaColecao(c)} />
+              ))}
+            </datalist>
+          </div>
+          {filtrando && (
+            <button type="button" className="btn btn-ghost px-4 text-sm" onClick={() => setColecao("")}>
+              Todas as coleções
+            </button>
+          )}
+          <p aria-live="polite" className="flex min-h-11 items-center text-sm text-muted">
+            {filtrando
+              ? `${visiveis.length} de ${prints?.length ?? 0} artes`
+              : `${prints?.length ?? 0} artes em ${colecoes.length} coleções`}
+          </p>
+        </div>
+      )}
       <div className="max-h-[70vh] overflow-y-auto p-5">
         {erro && <p className="text-gold-soft">{erro}</p>}
         {!erro && !prints && <p className="text-muted">Carregando artes…</p>}
         {prints?.length === 0 && <p className="text-muted">Não encontrei artes desta carta.</p>}
-        {prints && prints.length > 0 && (
+        {prints && prints.length > 0 && visiveis.length === 0 && (
+          <p className="text-muted">Esta carta não tem arte em nenhuma coleção com esse nome ou essa sigla.</p>
+        )}
+        {visiveis.length > 0 && (
           <ul className="grid grid-cols-[repeat(auto-fill,minmax(130px,1fr))] gap-3">
-            {prints.map((p) => (
+            {visiveis.map((p) => (
               <li key={p.id}>
                 <button
                   type="button"

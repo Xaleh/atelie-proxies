@@ -46,7 +46,7 @@ type ScryfallCard = ScryfallFace & {
   card_faces?: ScryfallFace[];
 };
 
-type ScryfallList = { data?: ScryfallCard[]; not_found?: Array<{ name?: string }> };
+type ScryfallList = { data?: ScryfallCard[]; has_more?: boolean; not_found?: Array<{ name?: string }> };
 
 /** As faces de uma carta: as de card_faces ou, sem elas, a própria carta. */
 function facesDaCarta(card: ScryfallCard): ScryfallFace[] {
@@ -103,17 +103,35 @@ async function search(q: string, opts: OpcoesDeBusca = {}): Promise<CardPrint[]>
 }
 
 async function searchBruta(q: string, opts: OpcoesDeBusca = {}): Promise<ScryfallCard[]> {
+  return (await paginaDaBusca(q, opts, 1)).cards;
+}
+
+/** Uma página da busca (até 175 cartas) e se existem mais páginas depois dela. */
+async function paginaDaBusca(q: string, opts: OpcoesDeBusca, pagina: number): Promise<{ cards: ScryfallCard[]; temMais: boolean }> {
   const params = new URLSearchParams({ q, unique: opts.unique ?? "cards", order: opts.order ?? "name" });
   if (opts.dir) params.set("dir", opts.dir);
+  if (pagina > 1) params.set("page", String(pagina));
   const res = await fetch(`${API}/cards/search?${params}`, {
     headers: HEADERS,
     next: { revalidate: UM_DIA },
   });
   // 404 = nenhuma carta; 400 = o Scryfall não entendeu o texto digitado.
-  if (res.status === 404 || res.status === 400) return [];
+  if (res.status === 404 || res.status === 400) return { cards: [], temMais: false };
   if (!res.ok) throw new Error(`Scryfall respondeu ${res.status}`);
   const json = (await res.json()) as ScryfallList;
-  return json.data ?? [];
+  return { cards: json.data ?? [], temMais: Boolean(json.has_more) };
+}
+
+/** Todas as páginas de uma busca, com a pausa que o Scryfall pede entre as chamadas. */
+async function searchCompleta(q: string, opts: OpcoesDeBusca, maxPaginas: number): Promise<CardPrint[]> {
+  const todas: ScryfallCard[] = [];
+  for (let pagina = 1; pagina <= maxPaginas; pagina++) {
+    if (pagina > 1) await pausa(100);
+    const { cards, temMais } = await paginaDaBusca(q, opts, pagina);
+    todas.push(...cards);
+    if (!temMais) break;
+  }
+  return todas.map(toPrint).filter((p): p is CardPrint => p !== null);
 }
 
 type Identificador = { name: string } | { oracle_id: string } | { id: string };
@@ -277,13 +295,19 @@ export async function buscarPorNomes(
   return { entries: comPortugues(found, pts), notFound };
 }
 
-/** Todas as artes de uma carta, em inglês e em português, da mais nova para a mais antiga. */
+/**
+ * Páginas de artes buscadas no máximo: 175 por página, o bastante para os
+ * terrenos básicos, que passam de mil impressões.
+ */
+const MAX_PAGINAS_DE_ARTES = 12;
+
+/**
+ * Todas as artes de uma carta, em inglês e em português, da mais nova para a
+ * mais antiga. Busca todas as páginas, para o filtro por coleção da janela de
+ * artes alcançar também as coleções antigas.
+ */
 export async function buscarImpressoes(oracleId: string): Promise<CardPrint[]> {
-  return search(`oracleid:${oracleId} (lang:en or lang:pt)`, {
-    unique: "prints",
-    order: "released",
-    dir: "desc",
-  });
+  return searchCompleta(`oracleid:${oracleId} (lang:en or lang:pt)`, { unique: "prints", order: "released", dir: "desc" }, MAX_PAGINAS_DE_ARTES);
 }
 
 export const HOSTS_DE_IMAGEM = ["cards.scryfall.io"];

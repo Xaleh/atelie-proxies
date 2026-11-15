@@ -9,7 +9,8 @@ painel em `/admin`.
 
 - **Loja:** página inicial e montador com busca por nome (inglês ou português),
   colagem de lista de deck, troca de arte (clicando na carta) e seletor EN/PT
-  por carta.
+  por carta. A janela de artes traz todas as impressões da carta e tem um
+  filtro por coleção, pelo nome ou pela sigla.
 - **Pedido:** fechamento sem cadastro, preço por faixa de quantidade calculado
   no servidor, página de acompanhamento em `/pedido/<token>`.
 - **Pagamento:** Pix copia-e-cola com QR (confirmado à mão no painel) e
