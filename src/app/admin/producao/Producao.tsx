@@ -34,6 +34,7 @@ import {
 import { baixarArquivo, gerarPdf, type TraducaoDoSlot } from "@/lib/print/pdf";
 import { facesFisicas } from "@/lib/traducao/tipos";
 import { useTraducoes } from "@/lib/traducao/cliente";
+import { useDiagramacao, type PedidoDeConferencia } from "@/lib/traducao/diagramacao";
 import { previaTraduzida } from "@/lib/traducao/render";
 import type { CardPrint, CatalogEntry } from "@/lib/types";
 
@@ -315,18 +316,30 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
   }, [slots]);
   const t = useTraducoes(facesParaTraduzir);
 
+  // Artes que vão receber o molde automático têm a imagem da frente conferida:
+  // as de diagramação especial (quadrinho, arte que ocupa a carta toda) ficam em inglês.
+  const aConferir: PedidoDeConferencia[] = [];
+  for (const sl of lista) {
+    const meta = detalhes.get(sl.printId)?.meta;
+    if (sl.traduzida && sl.face === 0 && meta && t.moldeQueVale(sl.printId, 0, meta) === "auto") aConferir.push({ printId: sl.printId, url: sl.thumb, meta });
+  }
+  const conferida = useDiagramacao(aConferir);
+  const arteEspecial = (sl: Slot) =>
+    t.moldeQueVale(sl.printId, sl.face, detalhes.get(sl.printId)?.meta) === "auto" && conferida(sl.printId) === false;
+
   const traducaoDe = (sl: Slot): TraducaoDoSlot | null => {
     if (!sl.traduzida) return null;
     const meta = detalhes.get(sl.printId)?.meta;
     const tr = t.textoPara(sl.nomeEn, sl.set, sl.num);
     const molde = t.moldeQueVale(sl.printId, sl.face, meta);
-    return meta && tr && molde ? { meta, face: sl.face, tr, molde } : null;
+    return meta && tr && molde && !arteEspecial(sl) ? { meta, face: sl.face, tr, molde } : null;
   };
   const situacaoPT = (sl: Slot): string | null => {
     if (!sl.traduzida) return null;
     if (t.traducao(sl.nomeEn) === undefined) return "PT · verificando";
     if (!t.textoPara(sl.nomeEn, sl.set, sl.num)) return "PT · sem tradução";
     if (!t.moldeQueVale(sl.printId, sl.face, detalhes.get(sl.printId)?.meta)) return "PT · sem molde";
+    if (arteEspecial(sl)) return "PT · arte especial";
     return "PT traduzida";
   };
   const semTraducao = lista.filter((sl) => sl.traduzida && !traducaoDe(sl)).length;
@@ -456,13 +469,18 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
     setStatus("Preparando o PDF…");
     setProgresso(0);
     try {
-      const blob = await gerarPdf(lista, ajustes, (feitas, total, nome) => {
+      const { pdf, emIngles } = await gerarPdf(lista, ajustes, (feitas, total, nome) => {
         setProgresso(feitas / total);
         if (nome) setStatus(`Preparando carta ${feitas + 1} de ${total}: ${nome}`);
       }, traducaoDe);
       const nome = pedidos.map((p) => p.code).join("-") || "avulso";
-      baixarArquivo(blob, `proxies-${nome}-${new Date().toISOString().slice(0, 10)}.pdf`);
-      setStatus(`PDF pronto: ${lista.length} cartas em ${folhas} ${folhas > 1 ? "folhas" : "folha"}. Imprima em tamanho real (100%).`);
+      baixarArquivo(pdf, `proxies-${nome}-${new Date().toISOString().slice(0, 10)}.pdf`);
+      setStatus(
+        `PDF pronto: ${lista.length} cartas em ${folhas} ${folhas > 1 ? "folhas" : "folha"}. Imprima em tamanho real (100%).` +
+          (emIngles.length
+            ? ` Atenção: ${emIngles.join(", ")} ${emIngles.length === 1 ? "saiu" : "saíram"} em inglês, porque a arte tem diagramação especial.`
+            : ""),
+      );
     } catch (e) {
       setStatus((e as Error).message || "Não consegui gerar o PDF.");
     } finally {
@@ -514,7 +532,8 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
           <Link href="/admin/traducoes" className="underline">
             Traduções
           </Link>{" "}
-          ou marque o molde da arte no botão Molde.
+          ou marque o molde da arte no botão Molde. Nas marcadas como &quot;arte especial&quot; (moldura de quadrinho, arte que
+          ocupa a carta toda), o molde automático não serve: troque a arte clicando na carta ou marque o molde à mão.
         </p>
       )}
       {avisos.map((a) => (

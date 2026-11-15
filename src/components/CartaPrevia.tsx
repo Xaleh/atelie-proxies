@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { previaTraduzida, type TextoParaDesenhar } from "@/lib/traducao/render";
+import { ErroDeDiagramacao, previaTraduzida, type TextoParaDesenhar } from "@/lib/traducao/render";
 import type { MetaDeImpressao, MoldeManual } from "@/lib/traducao/tipos";
 
 /**
@@ -26,7 +26,7 @@ export function CartaPrevia({
   molde?: MoldeManual | "auto" | null;
 }) {
   const [previa, setPrevia] = useState<{ chave: string; src: string } | null>(null);
-  const [falhou, setFalhou] = useState<string | null>(null);
+  const [falha, setFalha] = useState<{ chave: string; especial: boolean } | null>(null);
   const chave = tr && molde && meta ? JSON.stringify([url, face, tr, molde]) : null;
 
   useEffect(() => {
@@ -34,14 +34,15 @@ export function CartaPrevia({
     let vivo = true;
     previaTraduzida(url, meta, face, tr, molde)
       .then((src) => vivo && setPrevia({ chave, src }))
-      .catch(() => vivo && setFalhou(chave));
+      .catch((e: unknown) => vivo && setFalha({ chave, especial: e instanceof ErroDeDiagramacao }));
     return () => {
       vivo = false;
     };
   }, [chave, url, meta, face, tr, molde]);
 
   const pronta = chave && previa?.chave === chave ? previa.src : null;
-  const gerando = Boolean(chave && !pronta && falhou !== chave);
+  const falhou = chave && falha?.chave === chave ? falha : null;
+  const gerando = Boolean(chave && !pronta && !falhou);
   return (
     <div className="relative">
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -51,9 +52,9 @@ export function CartaPrevia({
           Gerando prévia em português…
         </span>
       )}
-      {chave && falhou === chave && (
+      {falhou && (
         <span className="absolute inset-x-2 bottom-2 rounded-md bg-ink/85 px-2 py-1 text-center text-[11px] font-semibold text-gold-soft">
-          Não consegui gerar a prévia
+          {falhou.especial ? "Arte com diagramação especial: o molde automático não serve" : "Não consegui gerar a prévia"}
         </span>
       )}
     </div>

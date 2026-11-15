@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { impressaoEscolhida, modoDoTexto, type CardPrint, type CartItem, type ModoDoTexto } from "../types";
 import { useTraducoes } from "./cliente";
+import { useDiagramacao, type PedidoDeConferencia } from "./diagramacao";
 import type { PedidoDeTraducao } from "./servidor";
 import type { MoldeManual } from "./tipos";
 import type { TextoParaDesenhar } from "./render";
@@ -13,8 +14,10 @@ export type Situacao = {
   print: CardPrint;
   /** A arte em inglês aceita o texto em português. */
   podeTraduzir: boolean;
-  /** Ainda buscando a tradução desta carta. */
+  /** Ainda buscando a tradução desta carta ou conferindo a arte. */
   carregando: boolean;
+  /** A arte tem diagramação especial: o texto em português não cabe nela. */
+  arteEspecial: boolean;
   tr: TextoParaDesenhar | null;
   molde: MoldeManual | "auto" | null;
 };
@@ -39,18 +42,37 @@ export function facesDoCarrinho(itens: CartItem[]): PedidoDeTraducao[] {
 export function useSituacoes(itens: CartItem[]) {
   const faces = useMemo(() => facesDoCarrinho(itens), [itens]);
   const t = useTraducoes(faces);
+  // Cartas pedidas em português numa arte em inglês que vai receber o molde
+  // automático: a imagem é conferida antes de a loja prometer a tradução.
+  const aConferir = useMemo(() => {
+    const out: PedidoDeConferencia[] = [];
+    for (const item of itens) {
+      const meta = item.en.meta;
+      if (item.lang !== "pt" || impressaoEscolhida(item).lang === "pt" || !meta) continue;
+      if (!t.textoPara(nomeDaFrente(item.en), item.en.set, item.en.collectorNumber)) continue;
+      if (t.moldeQueVale(item.en.id, 0, meta) === "auto") out.push({ printId: item.en.id, url: item.en.image, meta });
+    }
+    return out;
+  }, [itens, t]);
+  const conferida = useDiagramacao(aConferir);
   return useMemo(() => {
+    const esperando = new Set(aConferir.map((p) => p.printId));
     const situacao = (item: CartItem): Situacao => {
       const nome = nomeDaFrente(item.en);
-      const carregando = t.traducao(nome) === undefined;
       const tr = t.textoPara(nome, item.en.set, item.en.collectorNumber);
-      const molde = t.moldeQueVale(item.en.id, 0, item.en.meta);
-      const podeTraduzir = Boolean(tr && molde && item.en.meta);
+      let molde = t.moldeQueVale(item.en.id, 0, item.en.meta);
+      const ok = molde === "auto" ? conferida(item.en.id) : true;
+      const arteEspecial = ok === false;
+      if (arteEspecial) molde = null;
+      // enquanto a arte é conferida, a carta aparece como "verificando", não como traduzida
+      const conferindo = ok === undefined && esperando.has(item.en.id);
+      const podeTraduzir = Boolean(tr && molde && item.en.meta) && !conferindo;
       return {
         modo: modoDoTexto(item, podeTraduzir),
         print: impressaoEscolhida(item),
         podeTraduzir,
-        carregando,
+        carregando: t.traducao(nome) === undefined || conferindo,
+        arteEspecial,
         tr,
         molde,
       };
@@ -60,5 +82,5 @@ export function useSituacoes(itens: CartItem[]) {
       return n + (m === "oficial" || m === "traduzida" ? i.qty : 0);
     }, 0);
     return { situacao, emPortugues };
-  }, [itens, t]);
+  }, [itens, t, aConferir, conferida]);
 }

@@ -6,7 +6,7 @@
 import { loja } from "@/config/loja";
 import { CARD_H, CARD_W, POR_FOLHA, computeLayout, type Ajustes, type Layout } from "./layout";
 import type { Slot } from "./lote";
-import { renderizarTraducao, type TextoParaDesenhar } from "../traducao/render";
+import { ErroDeDiagramacao, renderizarTraducao, type TextoParaDesenhar } from "../traducao/render";
 import type { MetaDeImpressao, MoldeManual } from "../traducao/tipos";
 
 type Progresso = (feitas: number, total: number, nome: string) => void;
@@ -17,7 +17,13 @@ function hash(s: string): string {
   return (h >>> 0).toString(36);
 }
 
-const cacheJpeg = new Map<string, Uint8Array>();
+type CartaPronta = {
+  dados: Uint8Array;
+  /** A tradução foi pedida, mas a arte tem diagramação especial e saiu como está, em inglês. */
+  semTraducao: boolean;
+};
+
+const cacheJpeg = new Map<string, CartaPronta>();
 
 async function baixarImagem(url: string): Promise<ImageBitmap> {
   let r: Response;
@@ -42,7 +48,7 @@ async function cartaEmJpeg(
   url: string,
   s: Pick<Ajustes, "bleed" | "dpi" | "qual">,
   traducao: TraducaoDoSlot | null,
-): Promise<Uint8Array> {
+): Promise<CartaPronta> {
   const chave = `${url}|${s.bleed}|${s.qual}|${s.dpi}|${traducao ? JSON.stringify([traducao.face, traducao.tr, traducao.molde]) : ""}`;
   const guardada = cacheJpeg.get(chave);
   if (guardada) return guardada;
@@ -63,11 +69,21 @@ async function cartaEmJpeg(
     bmp = maior;
   }
   // O texto traduzido é desenhado já na resolução final, então sai nítido.
+  let semTraducao = false;
   if (traducao) {
-    const comTexto = await renderizarTraducao(bmp, traducao.meta, traducao.face, traducao.tr, traducao.molde);
-    if ("close" in bmp) bmp.close();
-    else bmp.width = bmp.height = 0;
-    bmp = comTexto;
+    let comTexto: HTMLCanvasElement | null = null;
+    try {
+      comTexto = await renderizarTraducao(bmp, traducao.meta, traducao.face, traducao.tr, traducao.molde);
+    } catch (e) {
+      // arte com diagramação especial: imprime a carta original, em inglês
+      if (!(e instanceof ErroDeDiagramacao)) throw e;
+      semTraducao = true;
+    }
+    if (comTexto) {
+      if ("close" in bmp) bmp.close();
+      else bmp.width = bmp.height = 0;
+      bmp = comTexto;
+    }
   }
 
   const W = bmp.width;
@@ -120,8 +136,9 @@ async function cartaEmJpeg(
   origem.width = origem.height = 0;
   if ("close" in bmp) bmp.close();
   else bmp.width = bmp.height = 0;
-  cacheJpeg.set(chave, dados);
-  return dados;
+  const pronta = { dados, semTraducao };
+  cacheJpeg.set(chave, pronta);
+  return pronta;
 }
 
 type Doc = import("jspdf").jsPDF;
@@ -156,19 +173,24 @@ function marcasDeCorte(doc: Doc, L: Layout, bleed: number) {
   });
 }
 
-/** Monta o PDF do lote: uma página A4 em paisagem para cada 8 cartas. */
+/**
+ * Monta o PDF do lote: uma página A4 em paisagem para cada 8 cartas. Devolve
+ * também os nomes das cartas que deviam sair traduzidas e saíram em inglês,
+ * porque a arte tem diagramação especial.
+ */
 export async function gerarPdf(
   slots: Slot[],
   s: Ajustes,
   progresso?: Progresso,
   traducaoDe: (sl: Slot) => TraducaoDoSlot | null = () => null,
-): Promise<Blob> {
+): Promise<{ pdf: Blob; emIngles: string[] }> {
   if (slots.length === 0) throw new Error("O lote está vazio.");
   const { jsPDF } = await import("jspdf");
   const L = computeLayout(s);
   const doc = new jsPDF({ unit: "mm", format: [L.W, L.H], orientation: "landscape", compress: true });
   const folhas = Math.ceil(slots.length / POR_FOLHA);
   const origens = [...new Set(slots.map((sl) => sl.origem).filter((o) => o !== "avulsa"))].join(", ");
+  const emIngles = new Set<string>();
 
   for (let p = 0; p < folhas; p++) {
     if (p) doc.addPage([L.W, L.H], "landscape");
@@ -178,7 +200,8 @@ export async function gerarPdf(
       const sl = pagina[k];
       progresso?.(p * POR_FOLHA + k, slots.length, sl.nome);
       const traducao = traducaoDe(sl);
-      const dados = await cartaEmJpeg(sl.png, s, traducao);
+      const { dados, semTraducao } = await cartaEmJpeg(sl.png, s, traducao);
+      if (semTraducao) emIngles.add(sl.nome);
       doc.addImage(
         dados,
         "JPEG",
@@ -198,7 +221,7 @@ export async function gerarPdf(
     doc.text(rodape.slice(0, 140), L.W / 2, L.H - 2, { align: "center" });
   }
   progresso?.(slots.length, slots.length, "");
-  return doc.output("blob");
+  return { pdf: doc.output("blob"), emIngles: [...emIngles] };
 }
 
 export function baixarArquivo(blob: Blob, nome: string) {
