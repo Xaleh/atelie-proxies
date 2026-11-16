@@ -43,6 +43,7 @@ type ScryfallCard = ScryfallFace & {
   layout?: string;
   border_color?: string;
   full_art?: boolean;
+  frame_effects?: string[];
   card_faces?: ScryfallFace[];
 };
 
@@ -61,6 +62,7 @@ function metaDaImpressao(card: ScryfallCard): MetaDeImpressao {
     borda: card.border_color ?? "",
     fullArt: Boolean(card.full_art),
     tipo: card.type_line ?? "",
+    efeitos: card.frame_effects ?? [],
     faces: facesDaCarta(card).map((f) => ({
       nome: f.name ?? card.name,
       tipo: f.type_line ?? card.type_line ?? "",

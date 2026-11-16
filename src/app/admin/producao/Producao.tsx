@@ -32,7 +32,7 @@ import {
   type Slot,
 } from "@/lib/print/lote";
 import { baixarArquivo, gerarPdf, type TraducaoDoSlot } from "@/lib/print/pdf";
-import { facesFisicas } from "@/lib/traducao/tipos";
+import { conferirSimbolos, ehAventura, facesFisicas } from "@/lib/traducao/tipos";
 import { pedidosDaFace, useTraducoes } from "@/lib/traducao/cliente";
 import { useDiagramacao, type PedidoDeConferencia } from "@/lib/traducao/diagramacao";
 import { previaTraduzida } from "@/lib/traducao/render";
@@ -347,6 +347,20 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
     return "PT traduzida";
   };
   const semTraducao = lista.filter((sl) => sl.traduzida && !traducaoDe(sl)).length;
+  // Tradução com quantidade de símbolos ({T}, custos…) diferente do original: o site não sabe qual falta.
+  const simbolosDiferentes = [
+    ...new Set(
+      lista
+        .filter((sl) => {
+          const info = traducaoDe(sl);
+          if (!info) return false;
+          const partes = ehAventura(info.meta) ? info.meta.faces : [info.meta.faces[info.face] ?? info.meta.faces[0]];
+          const textos = [info.tr.texto, info.tr.aventura?.texto ?? ""];
+          return partes.some((f, i) => i < 2 && !conferirSimbolos(textos[i], f.texto).ok);
+        })
+        .map((sl) => sl.nomeEn),
+    ),
+  ];
 
   const [previas, setPrevias] = useState<Record<string, string>>({});
   const chaveDaPrevia = (sl: Slot, info: TraducaoDoSlot) => JSON.stringify([sl.thumb, info.face, info.tr, info.molde]);
@@ -538,6 +552,16 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
           </Link>{" "}
           ou marque o molde da arte no botão Molde. Nas marcadas como &quot;arte especial&quot; (moldura de quadrinho, arte que
           ocupa a carta toda), o molde automático não serve: troque a arte clicando na carta ou marque o molde à mão.
+        </p>
+      )}
+      {simbolosDiferentes.length > 0 && (
+        <p role="status" className="panel border-gold p-4">
+          Confira os símbolos ({"{T}"}, custos de mana…) antes de imprimir: a tradução de {simbolosDiferentes.join(", ")} tem uma quantidade
+          diferente da carta original. Revise em{" "}
+          <Link href="/admin/traducoes" className="underline">
+            Traduções
+          </Link>
+          .
         </p>
       )}
       {avisos.map((a) => (

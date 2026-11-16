@@ -44,9 +44,16 @@ painel em `/admin`.
   `traducoes-arena.json` do agente do Arena (a importação substitui a anterior)
   e revisar o texto de qualquer carta.
 - **Moldes:** o texto entra sozinho nas artes com a moldura moderna (2015),
-  inclusive as cartas de aventura, os terrenos básicos de arte inteira e as
-  cartas com o texto solto sobre a arte (moldura de quadrinho), e nas molduras
-  antigas (1993, 1997 e 2003, inclusive as reimpressões "retrô"). A carta de
+  inclusive as cartas de aventura (moldura comum e "livro de histórias" de
+  Eldraine), as sagas que transformam, as cartas modais (a faixa do verso
+  troca só a palavra do tipo), os terrenos básicos de arte inteira, as cartas
+  com o texto solto sobre a arte (moldura de quadrinho), as Secret Lair com a
+  barra de tipo mais baixa, o fundo preto liso sem caixa e o painel do Star
+  Trek, e nas molduras antigas (1993, 1997 e 2003, inclusive as reimpressões
+  "retrô"). Os símbolos da carta nunca são redesenhados: o molde mede na
+  imagem onde estão as letras e apaga só elas. Os símbolos do texto traduzido
+  são conferidos contra o original: um símbolo trocado sai como o do original,
+  e uma quantidade diferente vira aviso em `/admin/traducoes` e na produção. A carta de
   aventura leva dois textos, o da criatura e o da aventura: ela só sai em
   português quando os dois têm tradução. Antes de prometer a tradução, o
   site confere a imagem da arte: se ela não tem as barras e caixas no lugar
@@ -59,8 +66,8 @@ painel em `/admin`.
 
 ## O que ainda não entrou
 
-- Planeswalkers, sagas, batalhas e classes só recebem português com molde
-  manual; o texto delas não cabe no molde automático.
+- Planeswalkers, sagas comuns (as que não transformam), batalhas e classes só
+  recebem português com molde manual; o texto delas não cabe no molde automático.
 - Envio de arte própria, fichas (tokens), One Piece e Pokémon.
 - Catálogo local de cartas: a busca usa a API do Scryfall, com cache de 24 h.
 

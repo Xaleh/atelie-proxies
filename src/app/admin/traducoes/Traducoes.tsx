@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { CartaPrevia } from "@/components/CartaPrevia";
 import { esquecerTraducoes, useTraducoes } from "@/lib/traducao/cliente";
-import { ROTULO_DA_FONTE, ehAventura, type MetaDeFace, type Traducao } from "@/lib/traducao/tipos";
+import { ROTULO_DA_FONTE, conferirSimbolos, ehAventura, type MetaDeFace, type Traducao } from "@/lib/traducao/tipos";
 import type { CatalogEntry } from "@/lib/types";
 
 type Arquivo = {
@@ -145,6 +145,7 @@ function FormularioDaFace({
   }
 
   const id = (c: string) => `${c}-${face}`;
+  const simbolos = conferirSimbolos(valores.texto, info.texto);
   return (
     <div className="panel flex flex-wrap items-start gap-5 p-5">
       <div className="flex min-w-0 flex-[999_1_360px] flex-col gap-3">
@@ -176,6 +177,17 @@ function FormularioDaFace({
             Texto de regras (uma habilidade por linha; símbolos como {"{T}"} e {"{G}"})
           </label>
           <textarea id={id("texto")} rows={6} className="field py-3" value={valores.texto} onChange={(e) => mudar("texto", e.target.value)} />
+          {valores.texto.trim() && !simbolos.ok && (
+            <p role="status" className="mt-2 rounded-[10px] border border-gold p-3">
+              Atenção: a quantidade de símbolos ({"{T}"}, custos de mana…) da tradução é diferente da carta original. Confira o texto de
+              regras antes de imprimir.
+            </p>
+          )}
+          {valores.texto.trim() && simbolos.corrigido && (
+            <p className="mt-2 text-xs text-muted">
+              Alguns símbolos da tradução estão diferentes do original. Na carta, valem os do original, na mesma ordem.
+            </p>
+          )}
         </div>
         <div>
           <label htmlFor={id("sabor")} className="label">
