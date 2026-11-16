@@ -245,15 +245,45 @@ function somador(w: number, h: number) {
 export type OpcoesDeLimpeza = {
   /** Decisão sobre a marca d'água, que vale para a caixa toda (preenchida na primeira área). */
   marca?: boolean;
-  /** Área que não é apagada nem serve de fundo (o selo holográfico). */
+  /** Área que não é apagada nem serve de fundo (o selo holográfico, o indicador do verso). */
   protegido?: (x: number, y: number) => boolean;
+  /** Letra branca numa faixa colorida com ornamentos: só sai o que é quase sem cor. */
+  estrito?: boolean;
+  /** Tira também os círculos dos símbolos antigos ({T}, {1}…): o texto novo põe os símbolos em outro lugar. */
+  circulos?: boolean;
+  /** Multiplica a folga em volta das letras. */
+  folga?: number;
+  /** Refaz o fundo com o desenho logo acima e logo abaixo, espelhado (faixa com ornamentos). */
+  espelho?: boolean;
+  /** Preenchido pela limpeza: 1 = letra clara em fundo escuro; -1 = o contrário. */
+  dir?: 1 | -1;
+  /** Preenchido pela limpeza: cor das letras originais, ou null se não deu para medir. */
+  corTinta?: RGB | null;
 };
+
+/**
+ * Cor do texto novo: a mesma das letras originais (medida na limpeza); se não
+ * der para medir, contraste com o fundo.
+ */
+export function corDoTexto(op: OpcoesDeLimpeza | null, fundo: RGB | null, padrao?: RGB): string {
+  const lf = lum(fundo || padrao || [128, 128, 128]);
+  if (op && op.corTinta && Math.abs(lum(op.corTinta) - lf) > 0.3) {
+    // a borda suavizada das letras puxa a cor medida para o fundo: letra clara e quase sem cor volta a ser
+    // branca, escura volta a ser preta
+    const c = op.corTinta, cr = Math.max(...c) - Math.min(...c);
+    if (cr < 45) return lum(c) > 0.5 ? "#fbfaf7" : "#111";
+    return rgb(c);
+  }
+  if (op && op.dir) return op.dir > 0 ? "#fff" : "#111";
+  return lf > 0.5 ? "#111" : "#fff";
+}
 
 /**
  * Apaga só as letras de uma área e preenche cada pixel apagado com o que está
  * em volta. O resto (arte vista através da caixa translúcida, textura,
  * desenhos, marca d'água pequena) fica como estava. Devolve a cor do fundo que
- * sobrou, para escolher a cor do texto novo.
+ * sobrou e anota em `op` a direção e a cor das letras originais, para o texto
+ * novo sair na mesma cor.
  */
 export function limparTexto(
   g: Ctx,
@@ -285,10 +315,35 @@ export function limparTexto(
     else if (L[j] < Lm - 0.3) escuras++;
   }
   const dir = claras > escuras ? 1 : -1; // letra clara em fundo escuro, ou o contrário
+  op.dir = dir;
   // tom da tinta das letras: só o que chega perto dele é letra (marca d'água e textura são meio-tom e ficam)
   const tinta = dir > 0 ? amostra[Math.floor(amostra.length * 0.985)] : amostra[Math.floor(amostra.length * 0.015)];
   const croma = (r: number, g2: number, b2: number) => Math.max(r, g2, b2) - Math.min(r, g2, b2);
+  // cor da tinta (média dos pixels mais extremos): letra clara só é o que tem essa cor (brilho colorido da arte fica)
+  const tc = [0, 0, 0];
+  {
+    let n = 0;
+    const lim0 = Math.abs(tinta - Lm) * 0.15;
+    for (let j = 0; j < N; j += 2)
+      if (Math.abs(L[j] - tinta) <= lim0) {
+        tc[0] += d[j * 4];
+        tc[1] += d[j * 4 + 1];
+        tc[2] += d[j * 4 + 2];
+        n++;
+      }
+    if (n) for (let c = 0; c < 3; c++) tc[c] /= n;
+  }
   const soma = somador(w, h);
+  // mediana de cada canal da área (a cor do papel da caixa)
+  const corDoMeio = (): number[] => {
+    const cr: number[] = [], cg: number[] = [], cb: number[] = [];
+    for (let j = 0; j < N; j += 7) {
+      cr.push(d[j * 4]);
+      cg.push(d[j * 4 + 1]);
+      cb.push(d[j * 4 + 2]);
+    }
+    return [cr, cg, cb].map((a) => (a.sort((p, q) => p - q), a[a.length >> 1]));
+  };
 
   // 1) fundo local estimado sem as letras (duas passadas) e máscara das letras
   const M = new Float32Array(N).fill(1), mask = new Uint8Array(N);
@@ -312,9 +367,13 @@ export function limparTexto(
         const r = d[j * 4], gg = d[j * 4 + 1], b = d[j * 4 + 2];
         const cor = Math.hypot(r - br, gg - bg, b - bb);
         // caixa clara: só o que chega perto da tinta é letra (a marca d'água é meio-tom); caixa escura: critério amplo
-        const pertoDaTinta = dir > 0 || Math.abs(L[j] - tinta) < 0.62 * Math.abs(bl - tinta);
+        // letra clara: só o que é quase da cor da tinta e sem cor forte (os brilhos da arte atrás da caixa translúcida ficam)
+        const pertoDaTinta =
+          dir > 0 && !op.estrito
+            ? Math.abs(L[j] - tinta) < 0.7 * Math.abs(bl - tinta) && Math.hypot(r - tc[0], gg - tc[1], b - tc[2]) < 130
+            : Math.abs(L[j] - tinta) < 0.62 * Math.abs(bl - tinta) && (!op.estrito || croma(r, gg, b) < 70); // estrito: letra branca em faixa colorida com ornamentos
         // círculo cinza dos símbolos de mana
-        const simbolo = cor > limiarCor && (dir > 0 || croma(r, gg, b) < croma(br, bg, bb) - 15);
+        const simbolo = dir < 0 && cor > limiarCor && croma(r, gg, b) < croma(br, bg, bb) - 15;
         mask[j] = (dir * (L[j] - bl) > limiarLuz && pertoDaTinta) || simbolo ? 1 : 0;
       }
     for (let j = 0; j < N; j++) M[j] = mask[j] ? 0 : 1;
@@ -323,13 +382,7 @@ export function limparTexto(
   // marca d'água grande atrás do texto (símbolo de facção, de guilda…): não dá para reconstruir o que as
   // letras cobriam sem inventar, então ela sai inteira e fica só o papel da caixa
   if (dir < 0) {
-    const cr: number[] = [], cg: number[] = [], cb: number[] = [];
-    for (let j = 0; j < N; j += 7) {
-      cr.push(d[j * 4]);
-      cg.push(d[j * 4 + 1]);
-      cb.push(d[j * 4 + 2]);
-    }
-    const med = [cr, cg, cb].map((a) => (a.sort((p, q) => p - q), a[a.length >> 1]));
+    const med = corDoMeio();
     const meio = new Uint8Array(N);
     let nMeio = 0;
     for (let j = 0; j < N; j++) {
@@ -339,14 +392,99 @@ export function limparTexto(
         nMeio++;
       }
     }
-    if (op.marca ?? nMeio / N > 0.14) {
+    // marca d'água = um desenho só, de um tom parecido; arte vista através da caixa translúcida tem muitas cores e fica
+    let sl = 0, sl2 = 0, sc = 0, sc2 = 0;
+    for (let j = 0; j < N; j++)
+      if (meio[j]) {
+        sl += L[j];
+        sl2 += L[j] * L[j];
+        const c = croma(d[j * 4], d[j * 4 + 1], d[j * 4 + 2]);
+        sc += c;
+        sc2 += c * c;
+      }
+    const nm = Math.max(1, nMeio);
+    const dpL = Math.sqrt(Math.max(0, sl2 / nm - (sl / nm) ** 2)), dpC = Math.sqrt(Math.max(0, sc2 / nm - (sc / nm) ** 2));
+    if (op.marca ?? (nMeio / N > 0.14 && dpL < 0.11 && dpC < 22)) {
       op.marca = true;
       for (let j = 0; j < N; j++) if (meio[j]) mask[j] = 1;
     }
   }
 
+  // cor das letras originais (média dos pixels mais perto do tom da tinta), para o texto novo sair na mesma cor
+  {
+    const c = [0, 0, 0];
+    let n = 0;
+    for (let j = 0; j < N; j++)
+      if (mask[j] && Math.abs(L[j] - tinta) < 0.08) {
+        c[0] += d[j * 4];
+        c[1] += d[j * 4 + 1];
+        c[2] += d[j * 4 + 2];
+        n++;
+      }
+    op.corTinta = n > 20 ? [Math.round(c[0] / n), Math.round(c[1] / n), Math.round(c[2] / n)] : null;
+  }
+
+  // círculos dos símbolos ({T}, {C}, {1}…): o texto novo põe os símbolos em outro lugar, então o círculo antigo
+  // sai inteiro (cada mancha redonda, do tamanho de um símbolo, diferente do fundo da caixa)
+  if (!op.estrito && op.circulos) {
+    const med = corDoMeio();
+    // procura discos: anel de pixels "de círculo" (nem fundo, nem tinta) com fundo logo em volta
+    const Lf = lum([med[0], med[1], med[2]]), disco = new Uint8Array(N);
+    for (let j = 0; j < N; j++) {
+      const dc = Math.hypot(d[j * 4] - med[0], d[j * 4 + 1] - med[1], d[j * 4 + 2] - med[2]);
+      disco[j] = dc > 22 && Math.abs(L[j] - tinta) > Math.abs(Lf - tinta) * 0.3 ? 1 : 0;
+    }
+    const rMin = Math.max(3, Math.round(0.0075 * H)), rMax = Math.round(0.019 * H), passo = Math.max(1, Math.round(rMin / 4));
+    const ANG = 24, cosA: number[] = [], sinA: number[] = [];
+    for (let k = 0; k < ANG; k++) {
+      cosA.push(Math.cos((k * 2 * Math.PI) / ANG));
+      sinA.push(Math.sin((k * 2 * Math.PI) / ANG));
+    }
+    const achados: Array<[number, number, number]> = [];
+    for (let cy = rMin; cy < h - rMin; cy += passo)
+      for (let cx = rMin; cx < w - rMin; cx += passo) {
+        if (!disco[cy * w + cx] && !mask[cy * w + cx]) continue;
+        for (let r = rMin; r <= rMax; r++) {
+          // o anel tem de ser de uma cor só (o círculo do símbolo é liso) e diferente do que está logo fora dele
+          let anel = 0;
+          const pts: number[] = [];
+          for (let k = 0; k < ANG; k++) {
+            const xp = Math.round(cx + cosA[k] * r * 0.9), yp = Math.round(cy + sinA[k] * r * 0.9);
+            if (xp < 0 || xp >= w || yp < 0 || yp >= h) continue;
+            const j = yp * w + xp;
+            if (disco[j]) anel++;
+            pts.push(j);
+          }
+          if (anel < ANG * 0.75 || pts.length < ANG * 0.8) continue;
+          const mc = [0, 1, 2].map((c) => {
+            const v = pts.map((j) => d[j * 4 + c]).sort((p2, q) => p2 - q);
+            return v[v.length >> 1];
+          });
+          const iguais = pts.filter((j) => Math.hypot(d[j * 4] - mc[0], d[j * 4 + 1] - mc[1], d[j * 4 + 2] - mc[2]) < 26).length;
+          if (iguais < pts.length * 0.75) continue;
+          let foraDoAnel = 0, nf = 0;
+          for (let k = 0; k < ANG; k++) {
+            const xq = Math.round(cx + cosA[k] * r * 1.3), yq = Math.round(cy + sinA[k] * r * 1.3);
+            if (xq < 0 || xq >= w || yq < 0 || yq >= h) continue;
+            const j = yq * w + xq;
+            nf++;
+            if (Math.hypot(d[j * 4] - mc[0], d[j * 4 + 1] - mc[1], d[j * 4 + 2] - mc[2]) > 28) foraDoAnel++;
+          }
+          if (nf && foraDoAnel >= nf * 0.7) {
+            achados.push([cx, cy, r]);
+            break;
+          }
+        }
+      }
+    for (const [cx, cy, r] of achados) {
+      const R = r + Math.max(2, Math.round(r * 0.3)); // inclui a sombra escura que os símbolos têm embaixo, à esquerda
+      for (let y = Math.max(0, cy - R); y <= Math.min(h - 1, cy + R); y++)
+        for (let x = Math.max(0, cx - R); x <= Math.min(w - 1, cx + R); x++) if ((x - cx) ** 2 + (y - cy) ** 2 <= R * R) mask[y * w + x] = 1;
+    }
+  }
+
   // 2) folga em volta das letras (bordas suavizadas do texto antigo)
-  const Sk = integral(w, h, (j) => mask[j]), r = Math.max(1, Math.round(H * 0.0022));
+  const Sk = integral(w, h, (j) => mask[j]), r = Math.max(1, Math.round(H * 0.0022 * (op.folga || (dir > 0 ? 1.2 : 1))));
   const apagar = new Uint8Array(N);
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) apagar[y * w + x] = soma(Sk, x - r, y - r, x + r + 1, y + r + 1) > 0 ? 1 : 0;
@@ -359,6 +497,113 @@ export function limparTexto(
           fora[y * w + x] = 1;
           apagar[y * w + x] = 0;
         }
+
+  if (op.espelho) {
+    // faixa com ornamentos: refaz com o desenho logo acima e logo abaixo, espelhado (sem mancha lisa)
+    const CH = g.canvas.height, ya = Math.max(0, y0 - h), yb = Math.min(CH, y1 + h);
+    const ext = g.getImageData(x0, ya, w, yb - ya).data;
+    const px = (x: number, yAbs: number, c: number) => ext[((Math.max(ya, Math.min(yb - 1, yAbs)) - ya) * w + x) * 4 + c];
+    const Sa = integral(w, h, (j) => apagar[j]), rf = Math.max(1, r);
+    // se o que está acima (ou abaixo) é outra coisa (a página clara embaixo de uma faixa vermelha), usa só o outro lado
+    const media = (ya2: number, yb2: number) => {
+      const m = [0, 0, 0];
+      let n = 0;
+      for (let yy = ya2; yy < yb2; yy++)
+        for (let x = 0; x < w; x += 3) {
+          for (let c = 0; c < 3; c++) m[c] += px(x, yy, c);
+          n++;
+        }
+      return m.map((v) => v / Math.max(1, n));
+    };
+    const bgm = [0, 0, 0];
+    let nb = 0;
+    for (let j = 0; j < N; j += 3)
+      if (!apagar[j]) {
+        for (let c = 0; c < 3; c++) bgm[c] += d[j * 4 + c];
+        nb++;
+      }
+    for (let c = 0; c < 3; c++) bgm[c] /= Math.max(1, nb);
+    const dist = (m: number[]) => Math.hypot(m[0] - bgm[0], m[1] - bgm[1], m[2] - bgm[2]);
+    const dT = dist(media(y0 - h, y0)), dB = dist(media(y1, y1 + h));
+    const lado = dB > dT * 2 + 20 ? 0 : dT > dB * 2 + 20 ? 1 : null;
+    for (let y = 0; y < h; y++) {
+      const t = h > 1 ? y / (h - 1) : 0.5, wb = lado != null ? lado : t < 0.4 ? 0 : t > 0.6 ? 1 : (t - 0.4) / 0.2;
+      for (let x = 0; x < w; x++) {
+        const j = y * w + x;
+        if (!apagar[j]) continue;
+        const a = soma(Sa, x - rf, y - rf, x + rf + 1, y + rf + 1) / (2 * rf + 1) ** 2;
+        for (let c = 0; c < 3; c++)
+          d[j * 4 + c] = a * ((1 - wb) * px(x, y0 - 1 - y, c) + wb * px(x, y1 + (h - 1 - y), c)) + (1 - a) * d[j * 4 + c];
+      }
+    }
+    g.putImageData(img, x0, y0);
+    return mediana(g, x0, y0, w, h);
+  }
+
+  if (dir > 0 && !op.estrito) {
+    // letra clara sobre arte (caixa translúcida): preenche de fora para dentro, camada por camada, com os vizinhos
+    // já conhecidos — as formas e degradês da arte continuam até o meio de cada letra, sem manchas lisas
+    const conhecido = new Uint8Array(N);
+    let falta = 0;
+    for (let j = 0; j < N; j++) {
+      conhecido[j] = apagar[j] && !fora[j] ? 0 : 1;
+      if (!conhecido[j]) falta++;
+    }
+    let borda: number[] = [];
+    const viz = [-w - 1, -w, -w + 1, -1, 1, w - 1, w, w + 1];
+    for (let j = 0; j < N; j++)
+      if (!conhecido[j]) {
+        const x = j % w;
+        for (const o of viz) {
+          const k = j + o, xk = k % w;
+          if (k >= 0 && k < N && Math.abs(xk - x) <= 1 && conhecido[k]) {
+            borda.push(j);
+            break;
+          }
+        }
+      }
+    while (borda.length && falta > 0) {
+      const novos: Array<[number, number, number, number]> = [];
+      for (const j of borda) {
+        if (conhecido[j]) continue;
+        const x = j % w, y = (j / w) | 0;
+        let n = 0;
+        const c = [0, 0, 0];
+        for (let dy2 = -2; dy2 <= 2; dy2++)
+          for (let dx2 = -2; dx2 <= 2; dx2++) {
+            const xx = x + dx2, yy = y + dy2;
+            if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+            const k = yy * w + xx;
+            if (!conhecido[k] || (fora[k] && apagar[k])) continue;
+            const pe = dx2 * dx2 + dy2 * dy2 <= 2 ? 2 : 1;
+            n += pe;
+            c[0] += d[k * 4] * pe;
+            c[1] += d[k * 4 + 1] * pe;
+            c[2] += d[k * 4 + 2] * pe;
+          }
+        if (n) novos.push([j, c[0] / n, c[1] / n, c[2] / n]);
+      }
+      if (!novos.length) break;
+      const prox = new Set<number>();
+      for (const [j, r2, g2, b2] of novos) {
+        d[j * 4] = r2;
+        d[j * 4 + 1] = g2;
+        d[j * 4 + 2] = b2;
+        conhecido[j] = 1;
+        falta--;
+      }
+      for (const [j] of novos) {
+        const x = j % w;
+        for (const o of viz) {
+          const k = j + o;
+          if (k >= 0 && k < N && Math.abs((k % w) - x) <= 1 && !conhecido[k]) prox.add(k);
+        }
+      }
+      borda = [...prox];
+    }
+    g.putImageData(img, x0, y0);
+    return mediana(g, x0, y0, w, h);
+  }
 
   // 3) preenche cada pixel apagado com a média dos pixels de fundo mais próximos (o raio cresce até achar)
   const SM = integral(w, h, (j) => (apagar[j] || fora[j] ? 0 : 1));
@@ -687,15 +932,21 @@ export function acharCaixaBordas(g: Ctx, W: number, H: number): CaixaAchada | nu
 /** Começo da moldura no alto da carta (abaixo da borda preta ou branca): o nome nunca fica acima disso. */
 export function topoDaMoldura(g: Ctx, W: number, H: number, padrao: number): number {
   try {
+    // a primeira borda; as seguintes podem ser as próprias letras
     const t = trechosDeBorda(g, W, H, false, 0.012, 0.06, 0.2, 0.8);
-    return t.length ? Math.max(padrao, t[t.length - 1][1] * H + 0.004 * H) : padrao;
+    return t.length ? Math.max(padrao, Math.min(0.046, t[0][1] + 0.003) * H) : padrao;
   } catch {
     return padrao;
   }
 }
 
-/** O texto original da caixa está centralizado? (algumas cartas de 1993 têm texto curto, grande e centralizado) */
-export function textoCentralizado(g: Ctx, x0: number, y0: number, x1: number, y1: number): boolean {
+/**
+ * O texto original da caixa está centralizado? (algumas cartas têm texto curto,
+ * grande e centralizado). `altura` é a altura das linhas originais, para o
+ * texto novo sair no mesmo tamanho.
+ */
+export function textoCentralizado(g: Ctx, x0: number, y0: number, x1: number, y1: number): { centrado: boolean; altura: number } {
+  let altura = 0;
   try {
     x0 = Math.round(x0);
     y0 = Math.round(y0);
@@ -707,8 +958,9 @@ export function textoCentralizado(g: Ctx, x0: number, y0: number, x1: number, y1
     const fundo = am[am.length >> 1];
     const ds = am.map((v) => Math.abs(v - fundo)).sort((a, b) => a - b);
     const lim = Math.min(0.3, Math.max(0.12, ds[Math.floor(ds.length * 0.99)] * 0.5));
-    const linhas: Array<{ a: number; b: number }> = [];
-    let atual: { a: number; b: number } | null = null;
+    type Linha = { a: number; b: number; y0: number; y1: number };
+    const linhas: Linha[] = [];
+    let atual: Linha | null = null;
     const m0 = Math.round(w * 0.04), m1 = w - m0; // as bordas da caixa ficam de fora
     for (let y = 0; y < h; y++) {
       let a = -1, b = -1, n = 0;
@@ -720,24 +972,32 @@ export function textoCentralizado(g: Ctx, x0: number, y0: number, x1: number, y1
         }
       if (n >= Math.max(2, w * 0.025) && n < w * 0.6) {
         if (!atual) {
-          atual = { a, b };
+          atual = { a, b, y0: y, y1: y };
           linhas.push(atual);
         } else {
           atual.a = Math.min(atual.a, a);
           atual.b = Math.max(atual.b, b);
+          atual.y1 = y;
         }
       } else atual = null;
     }
-    const ok = linhas.filter((l) => l.b - l.a > w * 0.15);
-    if (!ok.length) return false;
+    const altas = linhas
+      .filter((l) => l.b - l.a > w * 0.15)
+      .map((l) => l.y1 - l.y0 + 1)
+      .sort((p, q) => p - q);
+    const altMed = altas[Math.floor(altas.length * 0.75)] || 0;
+    altura = altMed;
+    const ok = linhas.filter((l) => l.b - l.a > w * 0.15 && l.y1 - l.y0 >= altMed * 0.5); // pedaços soltos (rabichos de letra) não contam
+    if (!ok.length) return { centrado: false, altura };
     const esq = ok.map((l) => l.a), cen = ok.map((l) => (l.a + l.b) / 2);
     const amp = (v: number[]) => Math.max(...v) - Math.min(...v);
     const meio = cen.reduce((s, v) => s + v, 0) / cen.length;
-    if (ok.length === 1) return Math.abs(meio - w / 2) < w * 0.05 && esq[0] > w * 0.12;
+    // uma linha só (não um bloco de linhas grudadas)
+    if (ok.length === 1) return { centrado: ok[0].y1 - ok[0].y0 < h * 0.22 && Math.abs(meio - w / 2) < w * 0.03 && esq[0] > w * 0.05, altura };
     // texto alinhado à esquerda: as margens esquerdas coincidem; centralizado: os centros coincidem
-    return amp(esq) > w * 0.06 && amp(cen) < Math.max(w * 0.05, amp(esq) * 0.6) && Math.abs(meio - w / 2) < w * 0.06;
+    return { centrado: amp(esq) > w * 0.06 && amp(cen) < Math.max(w * 0.05, amp(esq) * 0.6) && Math.abs(meio - w / 2) < w * 0.06, altura };
   } catch {
-    return false;
+    return { centrado: false, altura };
   }
 }
 
@@ -749,12 +1009,16 @@ export function apagarFio(g: Ctx, x0: number, y0: number, x1: number, y1: number
   const img = g.getImageData(x0, y0, w, h), d = img.data, L = luzes(d, w * h);
   const m = Math.max(2, Math.round(0.004 * H)), fio: number[] = [];
   for (let y = m; y < h - m; y++) {
-    let n = 0;
+    // fio = traço contínuo e mais escuro (uma linha de texto tem vãos entre as letras e não conta)
+    let corrida = 0, maior = 0;
     for (let x = 0; x < w; x++) {
       const v = L[y * w + x], ref = (L[(y - m) * w + x] + L[(y + m) * w + x]) / 2;
-      if (Math.abs(v - ref) > 0.05) n++;
+      if (ref - v > 0.04) {
+        corrida++;
+        if (corrida > maior) maior = corrida;
+      } else corrida = 0;
     }
-    if (n > w * 0.55) fio.push(y);
+    if (maior > w * 0.4) fio.push(y);
   }
   if (!fio.length) return;
   for (const y of fio)
@@ -768,4 +1032,244 @@ export function apagarFio(g: Ctx, x0: number, y0: number, x1: number, y1: number
       for (let c = 0; c < 3; c++) d[(y * w + x) * 4 + c] = d[(a * w + x) * 4 + c] * (1 - t) + d[(b * w + x) * 4 + c] * t;
     }
   g.putImageData(img, x0, y0);
+}
+
+export type LimitesDaFaixa = {
+  /** Onde o texto pode começar. */
+  ini: number;
+  /** Até onde a barra está livre, antes dos símbolos à direita. */
+  livre: number;
+  icone: boolean;
+  tx: number | null;
+  /** Primeira letra depois do ícone da esquerda. */
+  txLetra: number | null;
+};
+
+/**
+ * Onde cabe o texto numa barra (nome ou tipo) sem encostar nos símbolos: ícone
+ * à esquerda (transformar, lição…), custo de mana ou símbolo da coleção à
+ * direita. Posições em pixels.
+ */
+export function limitesFaixa(
+  g: Ctx,
+  W: number,
+  H: number,
+  y0: number,
+  y1: number,
+  op: { xa?: number; xb?: number; tx?: number; icone?: boolean; simbolos?: number } = {},
+): LimitesDaFaixa {
+  const xa = Math.round((op.xa ?? 0.04) * W), xb = Math.round((op.xb ?? 0.945) * W), w = xb - xa;
+  const ya = Math.round(y0 + (y1 - y0) * 0.28), yb = Math.round(y1 - (y1 - y0) * 0.28), h = Math.max(2, yb - ya);
+  const d = g.getImageData(xa, ya, w, h).data, L = luzes(d, w * h);
+  const am: number[] = [];
+  for (let j = 0; j < w * h; j += 3) am.push(j);
+  const ord = am.map((j) => L[j]).sort((p, q) => p - q), fundo = ord[ord.length >> 1];
+  const med = [0, 1, 2].map((c) => {
+    const a = am.map((j) => d[j * 4 + c]).sort((p, q) => p - q);
+    return a[a.length >> 1];
+  });
+  const tinta = new Array<boolean>(w).fill(false);
+  for (let x = 0; x < w; x++) {
+    let n = 0;
+    for (let y = 0; y < h; y++) {
+      const j = y * w + x;
+      if (Math.abs(L[j] - fundo) > 0.22 || Math.hypot(d[j * 4] - med[0], d[j * 4 + 1] - med[1], d[j * 4 + 2] - med[2]) > 75) n++;
+    }
+    tinta[x] = n >= Math.max(2, h * 0.12);
+  }
+  const vao = Math.round(0.008 * W);
+  let ini = Math.round((op.tx ?? 0.0863) * W) - xa - Math.round(0.012 * W), livre = w;
+  // ícone à esquerda (transformar, lição…): um bloco de tinta comprido que começa antes do nome e termina com um vão
+  const runs: Array<[number, number]> = [];
+  for (let x = 0; x < w; x++)
+    if (tinta[x]) {
+      const u = runs[runs.length - 1];
+      if (u && x - u[1] <= Math.round(0.004 * W)) u[1] = x;
+      else runs.push([x, x]);
+    }
+  const fx = (v: number) => Math.round(v * W) - xa;
+  let temIcone = false, tx: number | null = null;
+  const iP = runs.findIndex((r) => r[1] > fx(0.075));
+  if (iP >= 0) {
+    const r = runs[iP], prox = runs[iP + 1];
+    if (r[0] < fx(0.08) && r[1] > fx(0.1) && r[1] < fx(0.17) && op.icone && prox && prox[0] - r[1] >= Math.round(0.006 * W)) {
+      temIcone = true;
+      ini = r[1] + Math.round(0.004 * W);
+      tx = prox[0];
+    } else ini = Math.max(fx(0.072), r[0] - Math.round(0.004 * W));
+  }
+  // símbolos à direita: o grupo de tinta junto da ponta direita (vãos pequenos entre eles)
+  if (op.simbolos !== 0) {
+    let x = w - 1;
+    while (x > 0 && !tinta[x]) x--;
+    // a borda da própria barra, na ponta direita, não é símbolo: pula
+    {
+      let y2 = x;
+      while (y2 > 0 && tinta[y2]) y2--;
+      if (xa + y2 > 0.905 * W && x - y2 < 0.025 * W) {
+        x = y2;
+        while (x > 0 && !tinta[x]) x--;
+      }
+    }
+    const fimGrupo = x;
+    let vazio = 0, inicio = x;
+    for (; x > ini; x--) {
+      if (tinta[x]) {
+        inicio = x;
+        vazio = 0;
+      } else if (++vazio > vao) break;
+    }
+    const larg = (fimGrupo - inicio) / W, n = op.simbolos;
+    const plausivel = n ? larg > n * 0.03 && larg < n * 0.07 + 0.02 : larg > 0.015 && larg < 0.26;
+    if (fimGrupo > 0 && plausivel) livre = inicio;
+  }
+  // primeira letra depois do ícone (pula a borda fina da moldura do ícone)
+  let txLetra: number | null = null;
+  for (const r of runs) {
+    if (r[0] < fx(0.149)) continue; // a moldura do ícone termina antes disso
+    if (r[1] - r[0] >= 0.003 * W) {
+      txLetra = xa + r[0];
+      break;
+    }
+  }
+  return { ini: xa + ini, livre: xa + livre, icone: temIcone, tx: tx == null ? null : xa + tx, txLetra };
+}
+
+/** Até onde vão as letras do texto original na horizontal (para não apagar a moldura em volta da caixa). */
+export function extensaoTexto(g: Ctx, x0: number, y0: number, x1: number, y1: number): [number, number] | null {
+  try {
+    x0 = Math.round(x0);
+    y0 = Math.round(y0);
+    const w = Math.round(x1 - x0), h = Math.round(y1 - y0);
+    const L = luzes(g.getImageData(x0, y0, w, h).data, w * h);
+    const am: number[] = [];
+    for (let j = 0; j < w * h; j += 7) am.push(L[j]);
+    am.sort((a, b) => a - b);
+    const fundo = am[am.length >> 1];
+    const ds = am.map((v) => Math.abs(v - fundo)).sort((a, b) => a - b);
+    const lim = Math.min(0.3, Math.max(0.12, ds[Math.floor(ds.length * 0.99)] * 0.5));
+    const col = new Array<number>(w).fill(0);
+    let linhas = 0;
+    for (let y = 0; y < h; y++) {
+      let n = 0;
+      for (let x = 0; x < w; x++) if (Math.abs(L[y * w + x] - fundo) > lim) n++;
+      if (n >= w * 0.02 && n < w * 0.6) {
+        linhas++;
+        for (let x = 0; x < w; x++) if (Math.abs(L[y * w + x] - fundo) > lim) col[x]++;
+      }
+    }
+    if (linhas < 3) return null;
+    const minC = Math.max(2, linhas * 0.04);
+    let a = 0, b = w - 1;
+    while (a < w && col[a] < minC) a++;
+    while (b > a && col[b] < minC) b--;
+    return [x0 + a, x0 + b];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Posição real de uma barra (nome ou tipo) na imagem: as bordas de cima e de
+ * baixo, com o vão típico entre elas. Devolve quanto ela está deslocada em
+ * relação à moldura padrão (0 se não achar).
+ */
+export function ajusteBarra(g: Ctx, W: number, H: number, ya: number, yb: number, topoPadrao: number, vaoMin: number, vaoMax: number): number {
+  try {
+    const t = trechosDeBorda(g, W, H, false, ya, yb, 0.25, 0.7, 0.7);
+    let melhor: number | null = null;
+    for (let i = 0; i < t.length; i++)
+      for (let k = i + 1; k < t.length; k++) {
+        const vao = t[k][0] - t[i][1];
+        if (vao >= vaoMin && vao <= vaoMax) {
+          const dy = t[i][1] - topoPadrao;
+          if (melhor == null || Math.abs(dy) < Math.abs(melhor)) melhor = dy;
+        }
+      }
+    return melhor != null && Math.abs(melhor) < 0.05 ? melhor : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Barra de tipo mais baixa que o normal (sem borda com texto curto, ex.: Unfinity): devolve quanto ela desceu. */
+export function deslocamentoTipo(g: Ctx, W: number, H: number): number | null {
+  const t = trechosDeBorda(g, W, H, false, 0.55, 0.86, 0.2, 0.8, 0.7);
+  for (let i = 0; i < t.length - 1; i++) {
+    const vao = t[i + 1][0] - t[i][1];
+    if (vao >= 0.03 && vao <= 0.062) {
+      const dy = (t[i][0] + t[i][1]) / 2 - 0.5645;
+      if (dy > 0.03 && dy < 0.25) return dy;
+    }
+  }
+  return null;
+}
+
+/** Uma linha de texto sobre fundo liso, em fração da largura (x) e da altura (y) da carta. */
+export type LinhaLisa = { y0: number; y1: number; xa: number; xb: number };
+export type FundoLiso = { ini: number; linhas: LinhaLisa[] };
+
+/** Linhas de texto sobre um fundo liso e escuro (sem caixa: nome, tipo e regras direto no fundo, ex.: Edge of Eternities). */
+export function linhasFundoLiso(g: Ctx, W: number, H: number): FundoLiso | null {
+  const x0 = Math.round(0.05 * W), x1 = Math.round(0.95 * W), y0 = Math.round(0.52 * H), y1 = Math.round(0.905 * H), w = x1 - x0, h = y1 - y0;
+  const L = luzes(g.getImageData(x0, y0, w, h).data, w * h);
+  // começo da área lisa: daqui para baixo, quase todas as linhas são escuras (fora as letras)
+  const escura = new Array<number>(h).fill(0);
+  for (let y = 0; y < h; y++) {
+    let n = 0;
+    for (let x = 0; x < w; x++) if (L[y * w + x] < 0.2) n++;
+    escura[y] = n / w;
+  }
+  let ini = -1;
+  // (as linhas com letras são menos escuras: basta a maioria das linhas abaixo ser escura e o começo ser liso)
+  const faixaLisa = Math.max(3, Math.round(0.015 * H));
+  for (let y = 0; y < h * 0.6 && ini < 0; y++) {
+    let lisa = true;
+    for (let k = 0; k < faixaLisa && lisa; k++) if (escura[y + k] < 0.9) lisa = false;
+    if (!lisa) continue;
+    let n = 0;
+    for (let k = y; k < h; k++) if (escura[k] >= 0.8) n++;
+    if (n / (h - y) >= 0.72) ini = y;
+  }
+  if (ini < 0) return null;
+  type Linha = { y0: number; y1: number; a: number; b: number };
+  const linhas: Linha[] = [];
+  let cur: Linha | null = null, vazio = 0;
+  for (let y = ini; y < h; y++) {
+    let n = 0, a = w, b = 0;
+    for (let x = 0; x < w; x++)
+      if (L[y * w + x] > 0.45) {
+        n++;
+        if (x < a) a = x;
+        if (x > b) b = x;
+      }
+    if (n >= 2) {
+      if (!cur) {
+        cur = { y0: y, y1: y, a, b };
+        linhas.push(cur);
+      }
+      cur.y1 = y;
+      cur.a = Math.min(cur.a, a);
+      cur.b = Math.max(cur.b, b);
+      vazio = 0;
+    } else if (cur && ++vazio > 0.004 * H) cur = null;
+  }
+  const r = linhas
+    .map((l) => ({ y0: (y0 + l.y0) / H, y1: (y0 + l.y1) / H, xa: (x0 + l.a) / W, xb: (x0 + l.b) / W }))
+    .filter((l) => l.y1 - l.y0 >= 0.012 && l.xb - l.xa > 0.08 && l.xa < 0.2);
+  return r.length >= 3 ? { ini: (y0 + ini) / H, linhas: r } : null;
+}
+
+/** Barras do nome e do tipo no painel futurista, como [topo, base] em fração da altura. */
+export type BarrasDoPainel = { nome: [number, number]; tipo: [number, number] };
+
+/** Painel futurista (Star Trek): nome numa barra escura em cima e tipo numa barra escura embaixo, sem caixa de regras. */
+export function barrasPainel(g: Ctx, W: number, H: number): BarrasDoPainel | null {
+  const t = trechosDeBorda(g, W, H, false, 0.015, 0.95, 0.2, 0.8, 0.7);
+  const cima = t.filter((x) => x[1] <= 0.14), baixo = t.filter((x) => x[0] >= 0.78);
+  if (cima.length < 2 || baixo.length < 2 || t.some((x) => x[0] > 0.2 && x[1] < 0.76)) return null;
+  const nome: [number, number] = [cima[0][1], cima[1][0]], tipo: [number, number] = [baixo[0][1], baixo[1][0]];
+  if (nome[1] - nome[0] < 0.04 || tipo[1] - tipo[0] < 0.04) return null;
+  if (lum(mediana(g, 0.5 * W, nome[0] * H, 0.4 * W, (nome[1] - nome[0]) * H)) > 0.3) return null; // barras escuras
+  return { nome, tipo };
 }

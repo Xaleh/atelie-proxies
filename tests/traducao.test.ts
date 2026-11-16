@@ -9,6 +9,7 @@ import {
   aceitaMoldeAutomatico,
   basicoDeArteInteira,
   chaveDoSabor,
+  conferirSimbolos,
   ehAventura,
   facesFisicas,
   moldeParaUsar,
@@ -65,8 +66,28 @@ describe("molde", () => {
     expect(aceitaMoldeAutomatico(meta({ frame: "future" }))).toBe(false);
     expect(aceitaMoldeAutomatico(meta({ layout: "split" }))).toBe(false);
     expect(aceitaMoldeAutomatico(meta({ tipo: "Legendary Planeswalker — Jace" }))).toBe(false);
-    expect(aceitaMoldeAutomatico(meta({ tipo: "Enchantment — Saga" }))).toBe(false);
     expect(aceitaMoldeAutomatico(undefined)).toBe(false);
+  });
+
+  it("aceita a saga só na moldura de 2015 e quando ela transforma", () => {
+    // a saga comum tem layout próprio ("saga") no Scryfall e fica sem molde
+    expect(aceitaMoldeAutomatico(meta({ layout: "saga", tipo: "Enchantment — Saga" }))).toBe(false);
+    expect(aceitaMoldeAutomatico(meta({ layout: "transform", tipo: "Enchantment — Saga // Enchantment Creature — Human Monk" }))).toBe(true);
+    expect(aceitaMoldeAutomatico(meta({ frame: "2003", tipo: "Enchantment — Saga" }))).toBe(false);
+  });
+
+  it("confere os símbolos da tradução contra o original", () => {
+    // iguais, em qualquer caixa: nada a fazer
+    expect(conferirSimbolos("{t}: Adicione {G}.", "{T}: Add {G}.")).toEqual({ texto: "{t}: Adicione {G}.", ok: true });
+    expect(conferirSimbolos("Voar", "Flying")).toEqual({ texto: "Voar", ok: true });
+    // mesma quantidade, um trocado: vale o do original, na ordem
+    expect(conferirSimbolos("{2}{R}, {T}: Causa 1 de dano.", "{1}{R}, {T}: Deal 1 damage.")).toEqual({
+      texto: "{1}{R}, {T}: Causa 1 de dano.",
+      ok: true,
+      corrigido: true,
+    });
+    // quantidade diferente: não dá para saber qual falta, o texto fica e o painel avisa
+    expect(conferirSimbolos("Adicione {G}.", "{T}: Add {G}.")).toEqual({ texto: "Adicione {G}.", ok: false });
   });
 
   it("molde manual vence, bloqueio desliga, e sem nada vale o automático", () => {

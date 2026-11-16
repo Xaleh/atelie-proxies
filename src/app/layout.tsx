@@ -10,6 +10,8 @@ import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/crimson-pro/400.css";
 import "@fontsource/crimson-pro/400-italic.css";
 import "@fontsource/crimson-pro/700.css";
+// Fonte condensada das cartas de painel futurista (Star Trek), só no texto traduzido.
+import "@fontsource/antonio/700.css";
 import "./globals.css";
 import { Lupa } from "@/components/Lupa";
 import { loja } from "@/config/loja";

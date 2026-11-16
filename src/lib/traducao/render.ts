@@ -1,35 +1,58 @@
 /**
  * Escreve a tradução sobre a arte em inglês, num canvas do navegador.
  * O molde automático é o do site de produção do ateliê, portado sem mudar as
- * medidas: moldura moderna (2015), aventura, terreno básico de arte inteira,
- * texto solto sobre a arte (moldura de quadrinho) e molduras antigas (1993,
- * 1997 e 2003). Antes de escrever, confere se a imagem tem a diagramação esperada. O
- * molde manual usa os retângulos marcados no painel para aquela arte.
+ * medidas: moldura moderna (2015, inclusive aventuras, sagas que transformam,
+ * cartas modais, Secret Lair com a barra de tipo mais baixa, fundo liso sem
+ * caixa e painel futurista), terreno básico de arte inteira, texto solto sobre
+ * a arte (moldura de quadrinho) e molduras antigas (1993, 1997 e 2003). Os
+ * símbolos da carta nunca são redesenhados: o molde mede na imagem onde estão
+ * as letras em inglês e apaga só elas. Antes de escrever, confere se a imagem
+ * tem uma diagramação conhecida. O molde manual usa os retângulos marcados no
+ * painel para aquela arte.
  */
 import {
   acharArte,
   acharCaixaBordas,
   acharTinta,
   acharTopoPR,
+  ajusteBarra,
   apagarContornado,
   apagarFio,
   apagarTinta,
+  barrasPainel,
   blurRegion,
   bordasHorizontais,
+  corDoTexto,
+  deslocamentoTipo,
+  extensaoTexto,
+  limitesFaixa,
   limparTexto,
   linhasContornadas,
+  linhasFundoLiso,
   lum,
   mediana,
   rgb,
   textoCentralizado,
   topoDaMoldura,
+  trechosDeBorda,
+  type BarrasDoPainel,
   type Ctx,
+  type FundoLiso,
   type LinhaAchada,
+  type LinhaLisa,
   type OpcoesDeLimpeza,
   type Quadro,
   type RGB,
 } from "./pixels";
-import { basicoDeArteInteira, ehAventura, type MetaDeFace, type MetaDeImpressao, type MoldeManual, type Ret } from "./tipos";
+import {
+  basicoDeArteInteira,
+  conferirSimbolos,
+  ehAventura,
+  type MetaDeFace,
+  type MetaDeImpressao,
+  type MoldeManual,
+  type Ret,
+} from "./tipos";
 
 type TextoDaParte = { nome: string; tipo: string; texto: string; sabor: string };
 /** Nas cartas de aventura, `aventura` leva o texto da página esquerda do livro. */
@@ -40,6 +63,8 @@ type Fonte = Ctx | OffscreenCanvasRenderingContext2D;
 const FONT_T = "'Crimson Pro',Georgia,serif";
 const FONT_R = "'Crimson Pro',Georgia,serif";
 const FONT_F = "Inter,'Helvetica Neue',Arial,sans-serif";
+// Molduras de painel futurista (Star Trek): letras altas e bem estreitas.
+const FONT_CONDENSADA = "'Antonio','Arial Narrow',Arial,sans-serif";
 
 // Posições na moldura moderna (2015), em fração da largura (x) e da altura (y) da imagem.
 const GEO = {
@@ -60,7 +85,7 @@ let fontesProntas: Promise<unknown> | null = null;
 export function carregarFontes(): Promise<unknown> {
   if (!fontesProntas) {
     fontesProntas = Promise.all(
-      [`700 40px ${FONT_T}`, `400 40px ${FONT_R}`, `italic 400 40px ${FONT_R}`, `500 40px ${FONT_F}`].map((f) =>
+      [`700 40px ${FONT_T}`, `700 40px ${FONT_CONDENSADA}`, `400 40px ${FONT_R}`, `italic 400 40px ${FONT_R}`, `500 40px ${FONT_F}`].map((f) =>
         document.fonts.load(f).catch(() => null),
       ),
     );
@@ -169,8 +194,8 @@ function carregarSimbolos(...textos: string[]): Promise<unknown> {
   );
 }
 
-// Medido nas cartas impressas: o símbolo tem ~1,18 vez a altura da maiúscula, com o topo alinhado
-// ao topo das maiúsculas e a parte de baixo passando um pouco da linha de base.
+// Medido nas cartas impressas: o símbolo tem ~1,4 vez a altura da maiúscula e desce um pouco
+// abaixo da linha de base.
 let razaoCap: number | null = null;
 function alturaCap(g: Ctx): number {
   if (razaoCap) return razaoCap;
@@ -179,7 +204,7 @@ function alturaCap(g: Ctx): number {
   razaoCap = r > 0.45 && r < 0.85 ? r : 0.62;
   return razaoCap;
 }
-const larguraSimbolo = (g: Ctx, size: number) => alturaCap(g) * size * 1.32;
+const larguraSimbolo = (g: Ctx, size: number) => alturaCap(g) * size * 1.58;
 
 // Proporção altura-x / tamanho da fonte (cada fonte tem a letra minúscula de uma altura).
 let razaoX: number | null = null;
@@ -192,12 +217,12 @@ function alturaX(g: Ctx): number {
 }
 
 function drawSym(g: Ctx, sym: string, x: number, base: number, size: number): number {
-  const cap = alturaCap(g) * size, d = cap * 1.18, oficial = SIMB_OK.get(arquivoDoSimbolo(sym));
+  const cap = alturaCap(g) * size, d = cap * 1.4, oficial = SIMB_OK.get(arquivoDoSimbolo(sym));
   if (oficial) {
-    g.drawImage(oficial, x, base - cap, d, d);
-    return d + cap * 0.14;
+    g.drawImage(oficial, x, base - cap * 1.2, d, d);
+    return d + cap * 0.18;
   }
-  const r = d / 2, cx = x + r, cy = base - cap + r;
+  const r = d / 2, cx = x + r, cy = base - cap * 1.2 + r;
   size = d / 0.8; // as proporções do desenho de reserva foram feitas para d = 0,8 do tamanho
   const s = sym.toUpperCase(), parts = s.split("/");
   g.save();
@@ -266,24 +291,28 @@ function tokenize(text: string, forceItalic = false): Token[] {
   return out;
 }
 
-/**
- * Caixa do texto de regras. `maxX` e `minX` são a altura da letra minúscula
- * (altura-x) maior e menor que o texto pode ter. Com `ptY`, as linhas que
- * descem abaixo do topo da caixa de P/R ficam mais curtas (`ptW`) e o texto
- * pode ir até `fundo`. `topo` começa no alto da caixa em vez de centralizar na
- * altura; `centrar` centraliza cada linha; `contorno` desenha a borda preta
- * das letras, em fração do tamanho da fonte.
- */
-type Caixa = {
+/** Área onde o texto corre. Com `ptY`, as linhas que descem abaixo do topo da caixa de P/R ficam mais curtas (`ptW`) e o texto pode ir até `fundo`. */
+type Area = {
   x: number;
   w: number;
   y: number;
   h: number;
-  maxX: number;
-  minX: number;
   ptY?: number | null;
   ptW?: number;
   fundo?: number;
+  /** Altura-x do tamanho padrão da carta: os símbolos ficam sempre nesse tamanho. */
+  symX?: number;
+  maxX?: number;
+};
+/**
+ * Caixa do texto de regras. `maxX` e `minX` são a altura da letra minúscula
+ * (altura-x) maior e menor que o texto pode ter. `topo` começa no alto da
+ * caixa em vez de centralizar na altura; `centrar` centraliza cada linha;
+ * `contorno` desenha a borda preta das letras, em fração do tamanho da fonte.
+ */
+type Caixa = Area & {
+  maxX: number;
+  minX: number;
   topo?: boolean;
   centrar?: boolean;
   contorno?: number;
@@ -293,14 +322,18 @@ type Plano = {
   h: number;
   sep: number | null;
   size: number;
+  symSize: number;
   xh: number;
   cabe: boolean;
 };
 
-// O texto é dimensionado pela altura da letra minúscula, como nas cartas impressas:
-// linhas a 2 vezes essa altura. Só diminui se não couber.
-function planejarTexto(g: Ctx, paras: string[], flavor: string, box: Caixa, xh: number, emL: boolean): Plano {
-  const size = xh / alturaX(g), lh = xh * 2.02, pg = xh * 0.72, gapSabor = xh * 1.9;
+// O texto é dimensionado pela altura da letra minúscula (altura-x), como nas cartas impressas.
+// Só diminui se não couber.
+function planejarTexto(g: Ctx, paras: string[], flavor: string, box: Area, xh: number, emL: boolean): Plano {
+  // os símbolos ficam sempre no tamanho da carta original (o da letra no tamanho padrão); só as letras diminuem
+  const size = xh / alturaX(g), symSize = Math.max(size, (box.symX || box.maxX || xh) / alturaX(g));
+  // medidas tiradas das cartas impressas
+  const lh = xh * 2.22, lhSym = Math.max(lh, alturaCap(g) * symSize * 1.5), pg = xh * 0.85, gapSabor = xh * 2.1;
   const limite = emL ? (box.fundo ?? box.y + box.h) : box.y + box.h;
   const ptY = emL ? (box.ptY ?? Infinity) : Infinity;
   const largura = (y: number) => (box.y + y + lh > ptY ? (box.ptW ?? box.w) : box.w);
@@ -310,6 +343,7 @@ function planejarTexto(g: Ctx, paras: string[], flavor: string, box: Caixa, xh: 
   if (flavor) blocos.push({ toks: tokenize(flavor, true), sabor: true });
   setFont(g, size);
   const spW = g.measureText(" ").width;
+  const altura = (linha: TokenNaLinha[]) => (linha.some((t) => t.sym) ? lhSym : lh);
   blocos.forEach((bl, i) => {
     if (i) {
       if (bl.sabor) {
@@ -324,7 +358,7 @@ function planejarTexto(g: Ctx, paras: string[], flavor: string, box: Caixa, xh: 
         continue;
       }
       let tw: number;
-      if (t.sym) tw = larguraSimbolo(g, size);
+      if (t.sym) tw = larguraSimbolo(g, symSize);
       else {
         setFont(g, size, t.it);
         tw = g.measureText(t.w!).width;
@@ -332,7 +366,7 @@ function planejarTexto(g: Ctx, paras: string[], flavor: string, box: Caixa, xh: 
       const gap = sp ? spW : 0;
       if (linha.length && w + gap + tw > maxW) {
         linhas.push({ itens: linha, y, w });
-        y += lh;
+        y += altura(linha);
         maxW = largura(y);
         linha = [];
         w = 0;
@@ -343,13 +377,13 @@ function planejarTexto(g: Ctx, paras: string[], flavor: string, box: Caixa, xh: 
     }
     if (linha.length) {
       linhas.push({ itens: linha, y, w });
-      y += lh;
+      y += altura(linha);
     }
   });
-  return { linhas, h: y, sep, size, xh, cabe: box.y + y <= limite + xh * 0.3 };
+  return { linhas, h: y, sep, size, symSize, xh, cabe: box.y + y <= limite + xh * 0.3 };
 }
 
-function layoutText(g: Ctx, tr: TextoParaDesenhar, box: Caixa, color: string) {
+function layoutText(g: Ctx, tr: { texto: string; sabor: string }, box: Caixa, color: string) {
   const paras = String(tr.texto || "").split(/\n+/).map((s) => s.trim()).filter(Boolean);
   const flavor = String(tr.sabor || "").trim();
   const procurar = (emL: boolean): Plano => {
@@ -382,10 +416,10 @@ function layoutText(g: Ctx, tr: TextoParaDesenhar, box: Caixa, color: string) {
   }
   for (const linha of plan.linhas) {
     const base = y0 + linha.y + xh * 1.55; // a linha de base fica a 1,55 altura-x do topo da linha
-    // cartas de 1993 com pouco texto: cada linha centralizada, como nas impressas
+    // texto curto, grande e centralizado no original: cada linha centralizada, como nas impressas
     const dx = box.centrar ? Math.max(0, (box.w - linha.w) / 2) : 0;
     for (const t of linha.itens) {
-      if (t.sym) drawSym(g, t.sym, box.x + dx + t.x, base, size);
+      if (t.sym) drawSym(g, t.sym, box.x + dx + t.x, base + (plan.symSize - size) * alturaCap(g) * 0.09, plan.symSize);
       else {
         setFont(g, size, t.it);
         g.fillStyle = color;
@@ -403,32 +437,147 @@ function layoutText(g: Ctx, tr: TextoParaDesenhar, box: Caixa, color: string) {
   }
 }
 
+/** A arte tem diagramação especial, que o molde automático não reconhece. */
+export class ErroDeDiagramacao extends Error {
+  constructor() {
+    super("Esta arte tem uma diagramação especial e não pode ser traduzida. Escolha outra arte ou deixe em inglês.");
+    this.name = "ErroDeDiagramacao";
+  }
+}
+
+type Faixa = [x0: number, y0: number, x1: number, y1: number];
+const simbolosDoCusto = (mana: string) => (mana.match(/\{[^}]+\}/g) || []).length;
+const DUAS_FACES = ["transform", "modal_dfc"];
+
 /**
- * Molde automático da moldura de 2015. Em vez de cobrir as caixas, apaga só as
- * letras em inglês: a arte vista através da caixa translúcida, a textura e a
- * marca d'água pequena continuam.
+ * Troca o texto de uma barra (nome ou tipo) apagando SÓ onde estavam as letras
+ * em inglês: ícones, custo de mana, símbolo da coleção e as caixinhas em volta
+ * deles ficam intactos. Escreve o português a partir do mesmo ponto.
+ * `lim` é até onde as letras podem estar; `ate`, até onde o texto novo pode ir;
+ * `tx`, onde as letras começam (posição padrão da moldura).
  */
-function moldeModerno(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info: MetaDeFace, tr: TextoParaDesenhar) {
-  const N = GEO.name, nSym = (info.mana.match(/\{[^}]+\}/g) || []).length;
-  const nx0 = N.x0 * W, nx1 = (N.right - nSym * N.sym - 0.012) * W, ny0 = N.y0 * H, ny1 = N.y1 * H;
-  // tira o texto antigo da barra e devolve a cor do texto novo
-  const bar = (x: number, y: number, w: number, h: number) => {
-    const claroAntes = lum(mediana(g, x, y, w, h)) > 0.5;
-    const fundo = limparTexto(g, x, y, x + w, y + h, H);
-    return (fundo ? lum(fundo) > 0.5 : claroAntes) ? "#111" : "#fff";
-  };
-  // nome
-  g.fillStyle = bar(nx0, ny0, nx1 - nx0, ny1 - ny0);
+function trocarTextoBarra(
+  g: Ctx,
+  W: number,
+  H: number,
+  txt: string,
+  base: number,
+  cap: number,
+  y0: number,
+  y1: number,
+  lim: { x0: number; x1: number },
+  ate: number,
+  tx: number,
+) {
+  // as letras antigas são apagadas só de tx até onde terminam
+  const ya = Math.max(y0, base - cap * 1.3), yb = Math.min(y1, base + cap * 0.45);
+  const t = acharTinta(g, Math.max(lim.x0, tx - 0.012 * W), ya, lim.x1, yb);
+  const xa = Math.max(lim.x0, tx - 0.016 * W), xb = t ? Math.min(lim.x1, Math.max(t.x2, tx) + 0.01 * W) : lim.x1;
+  const op: OpcoesDeLimpeza = {}, antes = mediana(g, xa, ya, xb - xa, yb - ya), fundo = limparTexto(g, xa, ya, xb, yb, H, op);
+  g.fillStyle = corDoTexto(op, fundo, antes);
   g.textAlign = "left";
   g.textBaseline = "alphabetic";
-  escreverAjustado(g, tr.nome || info.nome, N.tx * W, N.base * H, FONT_T, 700, N.cap * H, nx1 - N.tx * W - 0.01 * W);
+  escreverAjustado(g, txt, tx, base, FONT_T, 700, cap, ate - tx - 0.006 * W);
+}
+
+type OpcoesDaLinha = {
+  capMin?: number;
+  capMax?: number;
+  ate?: number;
+  sombra?: boolean;
+  fonte?: string;
+  maiusculas?: boolean;
+  /** Barra de cor lisa: cobre as letras antigas com a própria cor da barra. */
+  liso?: boolean;
+  /** Limpa a faixa inteira (só as letras saem), para o preenchimento enxergar o ornamento em volta. */
+  estrito?: boolean;
+  espelho?: boolean;
+  folga?: number;
+  cor?: RGB;
+  /** Texto centralizado onde estava o original, com largura de até `larguraMax`. */
+  centro?: boolean;
+  larguraMax?: number;
+};
+
+/** Uma linha de texto achada na imagem: apaga as letras antigas e escreve a nova no mesmo lugar, mesma altura e cor. */
+function trocarLinha(g: Ctx, W: number, H: number, txt: string, faixa: Faixa, op: OpcoesDaLinha = {}): boolean {
+  if (op.maiusculas) txt = txt.toLocaleUpperCase("pt-BR");
+  const FT = op.fonte || FONT_T, PESO = 700;
+  const t = acharTinta(g, ...faixa);
+  if (!t) return false;
+  const cap = Math.min((op.capMax || 0.03) * H, Math.max((op.capMin || 0.012) * H, t.cap));
+  const px = 0.006 * W, py = 0.005 * H;
+  const daFaixa = () => mediana(g, faixa[0], faixa[1], faixa[2] - faixa[0], faixa[3] - faixa[1]);
+  let fundo: RGB | null;
+  if (op.liso) {
+    // sem sobrar sombra das letras antigas
+    fundo = daFaixa();
+    g.fillStyle = rgb(fundo);
+    g.fillRect(t.x - 0.006 * W, faixa[1], t.x2 - t.x + 0.016 * W, faixa[3] - faixa[1]);
+  } else {
+    const rx0 = op.estrito ? faixa[0] : Math.max(faixa[0], t.x - px), ry0 = op.estrito ? faixa[1] : Math.max(faixa[1], t.y - py);
+    const rx1 = op.estrito ? Math.min(faixa[2], t.x2 + 0.04 * W) : Math.min(faixa[2], t.x2 + px);
+    const ry1 = op.estrito ? faixa[3] : Math.min(faixa[3], t.y2 + py);
+    fundo = limparTexto(g, rx0, ry0, rx1, ry1, H, { folga: op.folga, espelho: op.espelho, estrito: op.estrito });
+  }
+  // cor das letras originais; se não der para medir, contraste com o fundo
+  const lf = lum(fundo || daFaixa());
+  let cor: RGB = t.cor && Math.abs(lum(t.cor) - lf) > 0.3 ? t.cor : t.claras ? [245, 243, 238] : [20, 20, 20];
+  if (op.cor) cor = op.cor;
+  g.textAlign = "left";
+  g.textBaseline = "alphabetic";
+  if (op.sombra && lum(cor) > 0.5) {
+    g.fillStyle = "rgba(0,0,0,.75)";
+    escreverAjustado(g, txt, t.x + 0.0018 * W, t.base + 0.0018 * W, FT, PESO, cap, (op.ate || faixa[2]) - t.x);
+  }
+  g.fillStyle = rgb(cor);
+  let x = t.x, maxW = (op.ate || faixa[2]) - t.x;
+  if (op.centro) {
+    // linha de tipo das molduras de livro de histórias
+    maxW = op.larguraMax || faixa[2] - faixa[0];
+    fitLine(g, txt, FT, PESO, cap, 1e9);
+    const w = Math.min(g.measureText(txt).width, maxW);
+    x = (t.x + t.x2) / 2 - w / 2;
+  }
+  escreverAjustado(g, txt, x, t.base, FT, PESO, cap, maxW);
+  return true;
+}
+
+/**
+ * Molde automático da moldura de 2015. Em vez de cobrir as caixas, mede na
+ * imagem onde estão as letras em inglês e apaga só elas: custo de mana, símbolo
+ * da coleção, ícone de duas faces ou de lição, selo holográfico, indicador de
+ * P/R do verso, a arte vista através da caixa translúcida e a textura continuam.
+ * `dy` é quanto a barra de tipo está abaixo do lugar padrão.
+ */
+function moldeModerno(g: Ctx, W: number, H: number, meta: MetaDeImpressao, face: number, info: MetaDeFace, tr: TextoParaDesenhar, dy: number) {
+  // carta de duas faces ou lição: o ícone fica à esquerda do nome
+  const dfc = DUAS_FACES.includes(meta.layout);
+  const iconeEsperado = dfc || /\bLesson\b/.test(meta.tipo);
+  // algumas impressões têm as barras um pouco mais baixas ou altas: mede na imagem e acompanha
+  const dyN = ajusteBarra(g, W, H, 0.02, 0.14, 0.056, 0.033, 0.05);
+  const N = { ...GEO.name, y0: GEO.name.y0 + dyN, y1: GEO.name.y1 + dyN, base: GEO.name.base + dyN };
+  const nSym = simbolosDoCusto(info.mana), ny0 = N.y0 * H, ny1 = N.y1 * H;
+  // a barra é medida na própria imagem: o ícone à esquerda e o custo de mana à direita não são tocados
+  const lfN = limitesFaixa(g, W, H, ny0, ny1, { simbolos: nSym, tx: N.tx, icone: iconeEsperado });
+  // as letras do nome começam depois do ícone e da moldura dele (que vai até ~13,5% da largura);
+  // se o ícone não foi achado na imagem, a área padrão dele fica intacta mesmo assim
+  const nx0 = iconeEsperado ? 0.142 * W : 0.06 * W;
+  // nunca passa do começo do custo de mana: o menor entre o medido e o calculado pelo número de símbolos
+  const nx1 = Math.min(nSym && lfN.livre < 0.94 * W ? lfN.livre - 0.006 * W : W, (N.right - nSym * N.sym - 0.012) * W);
+  const txNome = iconeEsperado ? (lfN.txLetra && lfN.txLetra < 0.2 * W ? lfN.txLetra : 0.155 * W) : N.tx * W;
+  trocarTextoBarra(g, W, H, tr.nome || info.nome, N.base * H, N.cap * H, ny0, ny1, { x0: nx0, x1: nx1 }, nx1, txNome);
   // tipo
-  const Ty = GEO.type, yx0 = Ty.x0 * W, yx1 = Ty.x1 * W, yy0 = Ty.y0 * H, yy1 = Ty.y1 * H;
-  g.fillStyle = bar(yx0, yy0, yx1 - yx0, yy1 - yy0);
-  escreverAjustado(g, tr.tipo || info.tipo, Ty.tx * W, Ty.base * H, FONT_T, 700, Ty.cap * H, yx1 - Ty.tx * W - 0.01 * W);
-  if (ehAventura(meta) && tr.aventura) return moldeAventura(g, W, H, meta, tr, tr.aventura, bar);
+  const Ty = { ...GEO.type, y0: GEO.type.y0 + dy, y1: GEO.type.y1 + dy, base: GEO.type.base + dy }, yy0 = Ty.y0 * H, yy1 = Ty.y1 * H;
+  const lfT = limitesFaixa(g, W, H, yy0, yy1, { tx: Ty.tx });
+  const yx1 = Math.min(Ty.x1 * W, lfT.livre < 0.94 * W ? lfT.livre - 0.006 * W : W); // nunca chega no símbolo da coleção
+  trocarTextoBarra(g, W, H, tr.tipo || info.tipo, Ty.base * H, Ty.cap * H, yy0, yy1, { x0: 0.06 * W, x1: yx1 }, yx1, Ty.tx * W);
+  if (ehAventura(meta) && tr.aventura) return moldeAventura(g, W, H, meta, tr, tr.aventura);
   // caixa de texto
-  const T = GEO.text, tx0 = T.x0 * W, tx1 = T.x1 * W, ty0 = T.y0 * H, ty1 = T.y1 * H, pt = info.temPT;
+  const T = { ...GEO.text, y0: GEO.text.y0 + dy }, ext = extensaoTexto(g, GEO.text.x0 * W, (GEO.text.y0 + dy) * H, GEO.text.x1 * W, 0.88 * H);
+  // a limpeza começa um pouco antes da primeira letra: a moldura em volta da caixa fica intacta
+  const tx0 = ext && ext[0] - 0.01 * W > T.x0 * W ? Math.min(ext[0] - 0.01 * W, 0.085 * W) : T.x0 * W;
+  const tx1 = T.x1 * W, ty0 = T.y0 * H, ty1 = T.y1 * H, pt = info.temPT;
   const col = mediana(g, tx0, ty0, tx1 - tx0, (T.ptTop - T.y0) * H);
   const ptY = pt ? acharTopoPR(g, W, H, col, T.ptTop * H) : ty1;
   const rects: Quadro[] = pt
@@ -439,13 +588,23 @@ function moldeModerno(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info:
     : [[tx0, ty0, tx1 - tx0, ty1 - ty0]];
   // o selo holográfico invade a borda de baixo da caixa: fica intacto (com uma pequena folga)
   const selo = (x: number, y: number) => ((x - 0.5 * W) / (0.066 * W)) ** 2 + ((y - 0.9375 * H) / (0.037 * H)) ** 2 <= 1;
+  // frente de carta que transforma: o P/R do verso aparece pequeno acima do P/R ("4/4") e fica como está
+  const ind = dfc && face === 0 && Boolean(meta.faces[1]?.temPT);
+  const indicador = (x: number, y: number) =>
+    (ind && x > 0.862 * W && y > 0.844 * H && y < 0.872 * H) ||
+    (meta.layout === "modal_dfc" && x < 0.56 * W && y > 0.872 * H); // faixa do verso das cartas modais ("◀ Land  {T}: Add")
+  // texto curto, grande e centralizado (Inversão de Ondu)
+  const centrado = !pt && !info.sabor && !/\n/.test(info.texto) && textoCentralizado(g, tx0, ty0, tx1, Math.min(ty1, 0.885 * H)).centrado;
+  // o texto em inglês às vezes passa ao lado do "4/4": limpa também esse canto (o indicador fica protegido)
+  if (ind && ptY < T.ptTop * H) rects.push([T.ptLeft * W, ptY, tx1 - T.ptLeft * W, T.ptTop * H - ptY]);
   g.save();
   g.beginPath();
   g.rect(0, 0, W, H);
   g.ellipse(0.5 * W, 0.9375 * H, 0.0605 * W, 0.0332 * H, 0, 0, Math.PI * 2);
   g.clip("evenodd");
   let fundoDaCaixa: RGB | null = null;
-  const op: OpcoesDeLimpeza = { protegido: selo }; // a decisão sobre a marca d'água vale para a caixa toda
+  // a decisão sobre a marca d'água vale para a caixa toda
+  const op: OpcoesDeLimpeza = { protegido: (x, y) => selo(x, y) || indicador(x, y), circulos: true };
   rects.forEach((r, i) => {
     const f = limparTexto(g, r[0], r[1], r[0] + r[2], r[1] + r[3], H, op);
     if (i === 0) {
@@ -453,10 +612,11 @@ function moldeModerno(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info:
       if (!op.marca) op.marca = false;
     }
   });
+  const color = corDoTexto(op, fundoDaCaixa, col);
   g.restore();
-  const color = lum(fundoDaCaixa || col) > 0.5 ? "#111" : "#fff";
-  const limitePT = pt ? Math.min(ptY, T.ptTop * H) - 0.004 * H : null;
-  const top = ty0 + 0.006 * H, bottom = limitePT ?? T.fundo * H;
+  const ptL = Math.min(ptY, T.ptTop * H, ind ? 0.822 * H : Infinity); // onde o texto passa a desviar do P/R
+  const top = ty0 + 0.006 * H, bottom = pt ? ptL - 0.004 * H : T.fundo * H;
+  const fundoTxt = meta.layout === "modal_dfc" ? 0.868 * H : bottom; // a faixa do verso fica livre
   layoutText(
     g,
     tr,
@@ -464,15 +624,45 @@ function moldeModerno(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info:
       x: T.tx * W,
       w: (T.tr - T.tx) * W,
       y: top,
-      h: bottom - top,
-      maxX: 0.0165 * H,
+      h: Math.min(bottom, fundoTxt) - top,
+      maxX: centrado ? 0.021 * H : 0.0165 * H,
       minX: 0.0112 * H,
-      ptY: limitePT,
+      ptY: pt ? ptL - 0.004 * H : null,
       ptW: (T.ptLeft - T.tx - 0.012) * W,
       fundo: T.fundo * H,
+      centrar: centrado,
     },
     color,
   );
+  const outra = meta.faces[1 - face];
+  if (meta.layout === "modal_dfc" && outra) faixaDoVerso(g, W, H, outra.tipo);
+}
+
+// Carta modal: na faixa de baixo ("◀ Land  {T}: Add {W}") traduz só o tipo da outra face; o resto fica como está.
+const TIPO_PT: Record<string, string> = {
+  Land: "Terreno",
+  Creature: "Criatura",
+  Instant: "Mágica Instantânea",
+  Sorcery: "Feitiço",
+  Artifact: "Artefato",
+  Enchantment: "Encantamento",
+  Planeswalker: "Planeswalker",
+  Battle: "Batalha",
+};
+function faixaDoVerso(g: Ctx, W: number, H: number, tipo: string) {
+  const base = String(tipo || "").replace(/^Legendary\s+|^Snow\s+|^Basic\s+/g, "").split(/\s+[—-]\s+/)[0].split(/\s+/).pop();
+  const pt = base ? TIPO_PT[base] : undefined;
+  if (!pt) return;
+  // a palavra fica na pílula cinza da esquerda, logo depois do triângulo
+  const t = acharTinta(g, 0.065 * W, 0.893 * H, 0.2 * W, 0.918 * H);
+  if (!t) return;
+  const cap = 0.0125 * H, x1 = Math.min(t.x2 + 0.006 * W, 0.2 * W);
+  const op: OpcoesDeLimpeza = { folga: 1.6 }, antes = mediana(g, t.x, 0.895 * H, x1 - t.x, 0.02 * H);
+  const f = limparTexto(g, t.x - 0.003 * W, 0.894 * H, x1, 0.917 * H, H, op);
+  g.fillStyle = corDoTexto(op, f, antes);
+  g.textAlign = "left";
+  g.textBaseline = "alphabetic";
+  escreverAjustado(g, pt, t.x, t.base, FONT_T, 700, cap, 0.12 * W); // antes do {T} da faixa
 }
 
 // Aventura (moldura de 2015): a caixa de texto é um livro aberto. Página da esquerda = aventura
@@ -484,18 +674,15 @@ const GEO_AV = {
   dir: { x0: 0.51, y0: 0.632, x1: 0.93, y1: 0.915, ptTop: 0.885, ptLeft: 0.768 },
 };
 
-function moldeAventura(
-  g: Ctx,
-  W: number,
-  H: number,
-  meta: MetaDeImpressao,
-  tr: TextoParaDesenhar,
-  trAv: TextoDaParte,
-  bar: (x: number, y: number, w: number, h: number) => string,
-) {
+function moldeAventura(g: Ctx, W: number, H: number, meta: MetaDeImpressao, tr: TextoParaDesenhar, trAv: TextoDaParte) {
   const A = GEO_AV, cr = meta.faces[0], av = meta.faces[1];
+  // tira o texto antigo da faixa e devolve a cor do texto novo
+  const bar = (x: number, y: number, w: number, h: number) => {
+    const antes = mediana(g, x, y, w, h), op: OpcoesDeLimpeza = {};
+    return corDoTexto(op, limparTexto(g, x, y, x + w, y + h, H, op), antes);
+  };
   // faixa do nome da aventura (o custo de mana à direita fica como está)
-  const nSym = (av.mana.match(/\{[^}]+\}/g) || []).length, nx1 = (A.nome.right - nSym * A.nome.sym - 0.008) * W;
+  const nSym = simbolosDoCusto(av.mana), nx1 = (A.nome.right - nSym * A.nome.sym - 0.008) * W;
   g.fillStyle = bar(A.nome.x0 * W, A.nome.y0 * H, nx1 - A.nome.x0 * W, (A.nome.y1 - A.nome.y0) * H);
   g.textAlign = "left";
   g.textBaseline = "alphabetic";
@@ -506,12 +693,12 @@ function moldeAventura(
   // página da esquerda: texto da aventura
   const E = A.esq;
   apagarFio(g, (E.x0 + 0.02) * W, E.y0 * H, (E.x1 - 0.02) * W, E.y1 * H, H);
-  const fe = limparTexto(g, E.x0 * W, E.y0 * H, E.x1 * W, E.y1 * H, H, { marca: false });
+  const opE: OpcoesDeLimpeza = { marca: false }, fe = limparTexto(g, E.x0 * W, E.y0 * H, E.x1 * W, E.y1 * H, H, opE);
   layoutText(
     g,
-    { ...trAv, sabor: trAv.sabor || "" },
+    { texto: trAv.texto, sabor: trAv.sabor || "" },
     { x: (E.x0 + 0.013) * W, w: (E.x1 - E.x0 - 0.022) * W, y: (E.y0 + 0.004) * H, h: (E.y1 - E.y0 - 0.01) * H, maxX: 0.0145 * H, minX: 0.0095 * H },
-    lum(fe || [230, 220, 210]) > 0.5 ? "#111" : "#fff",
+    corDoTexto(opE, fe, [230, 220, 210]),
   );
   // página da direita: texto da criatura, em L em volta do P/R
   const D = A.dir, pt = cr.temPT, ptY = D.ptTop * H;
@@ -522,9 +709,10 @@ function moldeAventura(
       ]
     : [[D.x0 * W, D.y0 * H, (D.x1 - D.x0) * W, (D.y1 - D.y0) * H]];
   apagarFio(g, (D.x0 + 0.03) * W, D.y0 * H, (D.x1 - 0.02) * W, ptY, H);
+  const opD: OpcoesDeLimpeza = { marca: false };
   let fd: RGB | null = null;
   rects.forEach((r, i) => {
-    const f = limparTexto(g, r[0], r[1], r[0] + r[2], r[1] + r[3], H, { marca: false });
+    const f = limparTexto(g, r[0], r[1], r[0] + r[2], r[1] + r[3], H, i ? { marca: false } : opD);
     if (i === 0) fd = f;
   });
   const x = (D.x0 + 0.022) * W, top = (D.y0 + 0.006) * H;
@@ -542,16 +730,41 @@ function moldeAventura(
       ptW: (D.ptLeft - 0.012) * W - x,
       fundo: (D.y1 - 0.01) * H,
     },
-    lum(fd || [230, 220, 210]) > 0.5 ? "#111" : "#fff",
+    corDoTexto(opD, fd, [230, 220, 210]),
   );
 }
 
-/** A arte tem diagramação especial, que o molde automático não reconhece. */
-export class ErroDeDiagramacao extends Error {
-  constructor() {
-    super("Esta arte tem uma diagramação especial e não pode ser traduzida. Escolha outra arte ou deixe em inglês.");
-    this.name = "ErroDeDiagramacao";
-  }
+/**
+ * Aventura com moldura de "livro de histórias" (Trono de Eldraine): tudo achado
+ * na imagem (nome, tipo centralizado, faixas da aventura); páginas com medida própria.
+ */
+function moldeAventuraLivro(g: Ctx, W: number, H: number, meta: MetaDeImpressao, tr: TextoParaDesenhar, trAv: TextoDaParte) {
+  const cr = meta.faces[0], av = meta.faces[1];
+  const nC = simbolosDoCusto(cr.mana), nA = simbolosDoCusto(av.mana);
+  trocarLinha(g, W, H, tr.nome || cr.nome, [0.145 * W, 0.04 * H, (0.93 - nC * 0.052 - 0.015) * W, 0.115 * H], { capMin: 0.02, capMax: 0.026 });
+  trocarLinha(g, W, H, tr.tipo || cr.tipo, [0.2 * W, 0.565 * H, 0.8 * W, 0.615 * H], { capMin: 0.016, capMax: 0.025, centro: true, larguraMax: 0.6 * W });
+  trocarLinha(g, W, H, trAv.nome || av.nome, [0.07 * W, 0.628 * H, (0.478 - nA * 0.05 - 0.01) * W, 0.672 * H], { capMin: 0.015, capMax: 0.024, folga: 1.6, estrito: true });
+  trocarLinha(g, W, H, trAv.tipo || av.tipo, [0.07 * W, 0.676 * H, 0.485 * W, 0.717 * H], { capMin: 0.014, capMax: 0.022, folga: 1.6, estrito: true });
+  // página da esquerda (texto da aventura, centralizado na altura como na impressa)
+  const E = { x0: 0.084, y0: 0.733, x1: 0.481, y1: 0.879 };
+  apagarFio(g, (E.x0 + 0.02) * W, E.y0 * H, (E.x1 - 0.02) * W, E.y1 * H, H);
+  const opE: OpcoesDeLimpeza = { marca: false }, fe = limparTexto(g, E.x0 * W, E.y0 * H, E.x1 * W, E.y1 * H, H, opE);
+  layoutText(
+    g,
+    { texto: trAv.texto, sabor: trAv.sabor || "" },
+    { x: (E.x0 + 0.016) * W, w: (E.x1 - E.x0 - 0.028) * W, y: (E.y0 + 0.006) * H, h: (E.y1 - E.y0 - 0.012) * H, maxX: 0.0128 * H, minX: 0.0095 * H },
+    corDoTexto(opE, fe, [230, 220, 200]),
+  );
+  // página da direita (criatura); o P/R fica abaixo da página
+  const D = { x0: 0.524, y0: 0.648, x1: 0.906, y1: 0.878 };
+  apagarFio(g, (D.x0 + 0.03) * W, D.y0 * H, (D.x1 - 0.02) * W, D.y1 * H, H);
+  const opD: OpcoesDeLimpeza = { marca: false }, fd = limparTexto(g, D.x0 * W, D.y0 * H, D.x1 * W, D.y1 * H, H, opD);
+  layoutText(
+    g,
+    tr,
+    { x: (D.x0 + 0.016) * W, w: (D.x1 - D.x0 - 0.028) * W, y: (D.y0 + 0.01) * H, h: (D.y1 - D.y0 - 0.02) * H, maxX: 0.0128 * H, minX: 0.0095 * H },
+    corDoTexto(opD, fd, [230, 220, 200]),
+  );
 }
 
 /** A carta tem as barras e caixas onde o molde espera? (moldura de quadrinho, arte que toma a carta toda etc. não têm) */
@@ -588,7 +801,7 @@ function acharTextoSolto(g: Ctx, W: number, H: number, meta: MetaDeImpressao): T
 
 /** Texto branco com borda preta direto sobre a arte (moldura de quadrinho). */
 function moldeSolto(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoParaDesenhar, det: TextoSolto) {
-  const nSym = (info.mana.match(/\{[^}]+\}/g) || []).length;
+  const nSym = simbolosDoCusto(info.mana);
   const area = (l: LinhaAchada, px = 0.008, py = 0.006) =>
     [(l.xa - px) * W, (l.y0 - py) * H, (l.xb + px) * W, (l.y1 + py) * H] as const;
   const rg = det.regras, y0 = rg[0].y0, y1 = rg[rg.length - 1].y1, xa = rg[0].xa;
@@ -617,42 +830,110 @@ function moldeSolto(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoPar
   );
 }
 
-type Faixa = [x0: number, y0: number, x1: number, y1: number];
+/** Fundo preto liso sem caixa (Edge of Eternities): nome, tipo e regras escritos direto no fundo. */
+function moldeFundoLiso(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoParaDesenhar, det: FundoLiso) {
+  const [nome, tipo, ...regras] = det.linhas;
+  const faixa = (l: LinhaLisa): Faixa => [0.05 * W, (l.y0 - 0.006) * H, 0.95 * W, (l.y1 + 0.006) * H];
+  // o texto antigo (e o resto colorido dos símbolos) é coberto com a própria cor do fundo
+  trocarLinha(g, W, H, tr.nome || info.nome, faixa(nome), { capMin: 0.016, capMax: 0.03, cor: [245, 243, 238], liso: true });
+  trocarLinha(g, W, H, tr.tipo || info.tipo, faixa(tipo), { capMin: 0.012, capMax: 0.022, cor: [245, 243, 238], liso: true });
+  const y0 = regras[0].y0, y1 = regras[regras.length - 1].y1, xa = regras[0].xa;
+  const ry0 = (y0 - 0.008) * H, ry1 = Math.min(0.905, y1 + 0.01) * H;
+  const fundo = mediana(g, 0.05 * W, ry0, 0.9 * W, ry1 - ry0);
+  g.fillStyle = rgb(fundo);
+  g.fillRect(0.05 * W, ry0, 0.9 * W, ry1 - ry0);
+  const lh = regras.length > 1 ? Math.min(...regras.slice(1).map((l, i) => l.y0 - regras[i].y0)) : (y1 - y0) * 1.25;
+  layoutText(
+    g,
+    tr,
+    { x: xa * W, w: (0.92 - xa) * W, y: (y0 - 0.004) * H, h: (0.9 - y0) * H, maxX: Math.min(0.016, Math.max(0.0105, lh / 2.02)) * H, minX: 0.0095 * H, topo: true },
+    corDoTexto({ dir: 1 }, fundo, [10, 10, 10]),
+  );
+}
 
-/** Uma linha de texto achada na imagem: apaga as letras antigas e escreve a nova no mesmo lugar, mesma altura e cor. */
-function trocarLinha(
-  g: Ctx,
-  W: number,
-  H: number,
-  txt: string,
-  faixa: Faixa,
-  op: { capMin?: number; capMax?: number; ate?: number; sombra?: boolean } = {},
-): boolean {
-  const t = acharTinta(g, ...faixa);
-  if (!t) return false;
-  const cap = Math.min((op.capMax || 0.03) * H, Math.max((op.capMin || 0.012) * H, t.cap));
-  const px = 0.006 * W, py = 0.005 * H;
-  const fundo = limparTexto(g, Math.max(faixa[0], t.x - px), Math.max(faixa[1], t.y - py), Math.min(faixa[2], t.x2 + px), Math.min(faixa[3], t.y2 + py), H);
-  const lf = lum(fundo || mediana(g, faixa[0], faixa[1], faixa[2] - faixa[0], faixa[3] - faixa[1]));
-  // cor das letras originais; se não der para medir, contraste com o fundo
-  const cor: RGB = t.cor && Math.abs(lum(t.cor) - lf) > 0.3 ? t.cor : t.claras ? [245, 243, 238] : [20, 20, 20];
-  const maxW = (op.ate || faixa[2]) - t.x;
-  g.textAlign = "left";
-  g.textBaseline = "alphabetic";
-  if (op.sombra && lum(cor) > 0.5) {
-    g.fillStyle = "rgba(0,0,0,.75)";
-    escreverAjustado(g, txt, t.x + 0.0018 * W, t.base + 0.0018 * W, FONT_T, 700, cap, maxW);
+/** Painel futurista (Star Trek): só o nome e o tipo, em maiúsculas e na fonte condensada; a carta não tem caixa de regras. */
+function moldePainel(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoParaDesenhar, det: BarrasDoPainel) {
+  const op: OpcoesDaLinha = { fonte: FONT_CONDENSADA, maiusculas: true, capMin: 0.022, capMax: 0.04, liso: true };
+  trocarLinha(g, W, H, tr.nome || info.nome, [0.15 * W, (det.nome[0] + 0.004) * H, 0.93 * W, (det.nome[1] - 0.004) * H], op);
+  // o emblema fica à direita
+  trocarLinha(g, W, H, tr.tipo || info.tipo, [0.13 * W, (det.tipo[0] + 0.004) * H, 0.9 * W, (det.tipo[1] - 0.004) * H], { ...op, ate: 0.85 * W });
+}
+
+type Saga = { x0: number; x1: number; faixas: Array<[number, number]>; tipo: [number, number] };
+
+/**
+ * Saga (moldura moderna): coluna de capítulos à esquerda (I, II, III), cada um
+ * numa faixa separada por fio duplo; nome em cima e linha de tipo na barra de baixo.
+ */
+function acharSaga(g: Ctx, W: number, H: number, meta: MetaDeImpressao): Saga | null {
+  if (meta.frame !== "2015") return null;
+  const v = trechosDeBorda(g, W, H, true, 0.02, 0.7, 0.2, 0.75, 0.7);
+  const esq = v.find((t) => t[1] > 0.06 && t[1] < 0.11), dir = v.find((t) => t[0] > 0.4 && t[0] < 0.6);
+  const bar = trechosDeBorda(g, W, H, false, 0.78, 0.95, 0.2, 0.8, 0.7);
+  if (!esq || !dir || bar.length < 2) return null;
+  const x0 = esq[1] + 0.004, x1 = dir[0] - 0.004;
+  const h = trechosDeBorda(g, W, H, false, 0.1, 0.84, x0 + 0.06, x1 - 0.03, 0.7);
+  const topo = h.find((t) => t[0] < 0.14), divs: Array<[number, number]> = [];
+  for (let i = 0; i + 1 < h.length; i++)
+    if (h[i][0] > 0.15 && h[i + 1][0] - h[i][1] <= 0.01 && h[i + 1][1] - h[i][0] < 0.02) {
+      divs.push([h[i][0], h[i + 1][1]]);
+      i++;
+    }
+  if (!topo || !divs.length) return null;
+  const tb = bar.filter((t) => t[1] > 0.82 && t[1] < 0.87).pop();
+  const bb = tb && bar.find((t) => t[0] - tb[1] > 0.03 && t[0] - tb[1] < 0.05);
+  if (!tb || !bb) return null;
+  const faixas: Array<[number, number]> = [];
+  let y = topo[1] + 0.004;
+  for (const d of divs) {
+    faixas.push([y, d[0] - 0.003]);
+    y = d[1] + 0.003;
   }
-  g.fillStyle = rgb(cor);
-  escreverAjustado(g, txt, t.x, t.base, FONT_T, 700, cap, maxW);
-  return true;
+  faixas.push([y, tb[0] - 0.045]); // o P/R do verso ("5/4") fica no pé da coluna
+  return { x0, x1, faixas, tipo: [tb[1], bb[0]] };
+}
+
+function moldeSaga(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info: MetaDeFace, tr: TextoParaDesenhar, det: Saga) {
+  // capítulos: "I — texto", "II, III — texto"; o lembrete inicial entre parênteses não é impresso nesta moldura
+  const CAPITULO = /^[IVX]+(\s*,\s*[IVX]+)*\s*[—–-]/;
+  const caps = String(tr.texto || "")
+    .split(/\n+/)
+    .map((t) => t.trim())
+    .filter((t) => CAPITULO.test(t))
+    .map((t) => t.replace(/^[IVX]+(\s*,\s*[IVX]+)*\s*[—–-]\s*/, ""));
+  if (caps.length !== det.faixas.length) throw new ErroDeDiagramacao();
+  const nSym = simbolosDoCusto(info.mana), N = GEO.name, dfc = DUAS_FACES.includes(meta.layout);
+  const lf = limitesFaixa(g, W, H, N.y0 * H, N.y1 * H, { simbolos: nSym, tx: N.tx, icone: dfc });
+  const nx1 = Math.min(lf.livre - 0.006 * W, (N.right - nSym * N.sym - 0.012) * W);
+  const txNome = dfc ? (lf.txLetra && lf.txLetra < 0.2 * W ? lf.txLetra : 0.155 * W) : N.tx * W;
+  trocarTextoBarra(g, W, H, tr.nome || info.nome, N.base * H, N.cap * H, N.y0 * H, N.y1 * H, { x0: (dfc ? 0.138 : 0.06) * W, x1: nx1 }, nx1, txNome);
+  // linha de tipo na barra de baixo: base e altura das letras medidas na própria carta (até o símbolo da coleção)
+  const lt = limitesFaixa(g, W, H, det.tipo[0] * H, det.tipo[1] * H, { tx: 0.086 });
+  const tx1 = Math.min(0.86 * W, lt.livre - 0.012 * W); // o símbolo da coleção fica inteiro
+  const tt = acharTinta(g, 0.07 * W, det.tipo[0] * H, Math.min(0.6 * W, tx1), det.tipo[1] * H);
+  if (tt)
+    trocarTextoBarra(g, W, H, tr.tipo || info.tipo, tt.base, Math.max(0.016 * H, Math.min(0.024 * H, tt.cap)), det.tipo[0] * H, det.tipo[1] * H, { x0: 0.06 * W, x1: tx1 }, tx1, tt.x);
+  // o mesmo tamanho de letra em todos os capítulos: o menor que cabe em cada um
+  let xh = 0.0165 * H;
+  // o texto começa depois dos hexágonos dos capítulos
+  const xt = Math.max(det.x0 + 0.012, 0.112);
+  const boxes = det.faixas.map(([a, b]) => ({ x: xt * W, w: (det.x1 - xt - 0.012) * W, y: (a + 0.006) * H, h: (b - a - 0.012) * H }));
+  boxes.forEach((bx, i) => {
+    for (; xh > 0.0105 * H; xh *= 0.97) if (planejarTexto(g, [caps[i]], "", bx, xh, false).cabe) break;
+  });
+  boxes.forEach((bx, i) => {
+    const op: OpcoesDeLimpeza = { marca: false };
+    const f = limparTexto(g, bx.x - 0.006 * W, bx.y - 0.003 * H, bx.x + bx.w + 0.008 * W, bx.y + bx.h + 0.003 * H, H, op);
+    layoutText(g, { texto: caps[i], sabor: "" }, { ...bx, maxX: xh, minX: xh, symX: 0.0165 * H }, corDoTexto(op, f, [200, 200, 200]));
+  });
 }
 
 /** Terreno básico de arte inteira: nome em cima e "Terreno Básico — X" na barra de baixo. Não há caixa de texto. */
 function moldeBasico(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoParaDesenhar) {
   const N = GEO.name, nx0 = N.x0 * W, nx1 = (N.right - 0.012) * W; // barra de nome igual à das cartas comuns
-  const antes = mediana(g, nx0, N.y0 * H, nx1 - nx0, (N.y1 - N.y0) * H), fundo = limparTexto(g, nx0, N.y0 * H, nx1, N.y1 * H, H);
-  g.fillStyle = lum(fundo || antes) > 0.5 ? "#111" : "#fff";
+  const op: OpcoesDeLimpeza = {}, antes = mediana(g, nx0, N.y0 * H, nx1 - nx0, (N.y1 - N.y0) * H);
+  const fundo = limparTexto(g, nx0, N.y0 * H, nx1, N.y1 * H, H, op);
+  g.fillStyle = corDoTexto(op, fundo, antes);
   g.textAlign = "left";
   g.textBaseline = "alphabetic";
   escreverAjustado(g, tr.nome || info.nome, N.tx * W, N.base * H, FONT_T, 700, N.cap * H, nx1 - N.tx * W - 0.01 * W);
@@ -662,7 +943,7 @@ function moldeBasico(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoPa
 
 /** Molduras de 1997 a 2014: nome, linha de tipo e caixa de texto achados na imagem. */
 function moldeClassico(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info: MetaDeFace, tr: TextoParaDesenhar) {
-  const nSym = (info.mana.match(/\{[^}]+\}/g) || []).length;
+  const nSym = simbolosDoCusto(info.mana);
   const arte = acharArte(g, W, H), cx = acharCaixaBordas(g, W, H);
   if (!cx) throw new ErroDeDiagramacao();
   const altura = cx.y1 - cx.y0, largura = cx.x1 - cx.x0;
@@ -676,18 +957,18 @@ function moldeClassico(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info
   trocarLinha(g, W, H, tr.nome || info.nome, nomeFaixa, { capMin: 0.018, capMax: 0.028, sombra: !moderna });
   // linha de tipo: entre a arte e a caixa, antes do símbolo da edição
   const yt0 = cx.tipo0 + 0.003 * H, yt1 = cx.tipo1 - 0.002 * H;
-  // na moldura de 1997 a linha de tipo começa alinhada com a caixa de texto (manchas da textura à esquerda ficam de fora)
   if (yt1 - yt0 > 0.015 * H)
-    trocarLinha(g, W, H, tr.tipo || info.tipo, [moderna ? 0.085 * W : Math.max(0.07 * W, cx.x0 - 0.02 * W), yt0, 0.82 * W, yt1], {
+    trocarLinha(g, W, H, tr.tipo || info.tipo, [moderna ? 0.085 * W : 0.07 * W, yt0, 0.82 * W, yt1], {
       capMin: 0.013,
-      capMax: moderna ? 0.021 : 0.018,
+      capMax: 0.021,
       ate: 0.83 * W,
       sombra: !moderna,
     });
   // caixa de texto: apaga só as letras (a textura e a cor da caixa ficam); antes de 2003 não havia marca d'água
   const m = 0.012 * W;
-  const fundo = limparTexto(g, cx.x0, cx.y0, cx.x1, cx.y1, H, { marca: moderna ? undefined : false });
-  const cor = lum(fundo || corDaCaixa) > 0.5 ? "#111" : "#fff";
+  const op: OpcoesDeLimpeza = { marca: moderna ? undefined : false, circulos: true };
+  const fundo = limparTexto(g, cx.x0, cx.y0, cx.x1, cx.y1, H, op);
+  const cor = corDoTexto(op, fundo, corDaCaixa);
   // na moldura de 2003 a caixa de P/R invade o canto de baixo da caixa de texto
   const fim = cx.y1 - 0.008 * H, ptY = info.temPT && moderna ? cx.y1 - 0.03 * H : null;
   layoutText(
@@ -734,7 +1015,7 @@ function moldeAntigo(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoPa
     g.fillStyle = escuro ? "#141414" : "#f5f3ee";
     g.fillText(txt, t.x, t.base);
   };
-  const nSym = (info.mana.match(/\{[^}]+\}/g) || []).length;
+  const nSym = simbolosDoCusto(info.mana);
   const arte = acharArte(g, W, H);
   linha(
     tr.nome || info.nome,
@@ -745,10 +1026,13 @@ function moldeAntigo(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoPa
   linha(tr.tipo || info.tipo, [0.06 * W, 0.559 * H, 0.72 * W, 0.598 * H], 0.016, 0.021);
   const cx = { x0: 0.113 * W, x1: 0.897 * W, y0: 0.606 * H, y1: 0.874 * H };
   const corDaCaixa = mediana(g, 0.2 * W, 0.62 * H, 0.6 * W, 0.23 * H);
-  const centrado = textoCentralizado(g, cx.x0, cx.y0, cx.x1, cx.y1);
+  const { centrado, altura } = textoCentralizado(g, cx.x0, cx.y0, cx.x1, cx.y1);
+  // tamanho da letra original: a linha medida vai do topo das maiúsculas ao pé das letras (~2 alturas-x)
+  const xhOriginal = altura ? Math.min(0.025 * H, Math.max(0.011 * H, altura * 0.68)) : 0.0175 * H;
   // apaga só as letras: a textura da caixa fica
-  const fundo = limparTexto(g, cx.x0, cx.y0, cx.x1, cx.y1, H, { marca: false });
-  const cor = lum(fundo || corDaCaixa) > 0.5 ? "#111" : "#fff";
+  const op: OpcoesDeLimpeza = { marca: false, circulos: true };
+  const fundo = limparTexto(g, cx.x0, cx.y0, cx.x1, cx.y1, H, op);
+  const cor = corDoTexto(op, fundo, corDaCaixa);
   const m = 0.02 * W;
   // quando a carta original tem o texto grande e centralizado, a traduzida também tem
   layoutText(
@@ -759,7 +1043,7 @@ function moldeAntigo(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoPa
       w: cx.x1 - cx.x0 - 2 * m,
       y: cx.y0 + 0.008 * H,
       h: cx.y1 - cx.y0 - 0.016 * H,
-      maxX: centrado ? 0.026 * H : 0.0175 * H,
+      maxX: centrado ? xhOriginal : 0.0175 * H,
       minX: 0.0112 * H,
       centrar: centrado,
     },
@@ -808,30 +1092,58 @@ function moldeManual(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoPa
   }
 }
 
-/**
- * Molde automático: confere a diagramação da imagem e escolhe o desenho pela
- * moldura. Lança `ErroDeDiagramacao` se a arte não tiver a diagramação esperada.
- */
-function moldeAutomatico(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info: MetaDeFace, tr: TextoParaDesenhar) {
-  if (!diagramacaoReconhecida(g, W, H, meta)) {
-    const solto = acharTextoSolto(g, W, H, meta); // texto direto sobre a arte, como nas cartas de quadrinho
-    if (!solto) throw new ErroDeDiagramacao();
-    moldeSolto(g, W, H, info, tr, solto);
-    trocaIdiomaRodape(g, W, H, "PT");
-    return;
+type Diagramacao =
+  | { modo: "padrao"; dy: number }
+  | { modo: "saga"; det: Saga }
+  | { modo: "liso"; det: FundoLiso }
+  | { modo: "painel"; det: BarrasDoPainel }
+  | { modo: "solto"; det: TextoSolto };
+
+/** Qual diagramação a imagem tem (null = nenhuma que o molde automático saiba desenhar). `info` é a face que está na imagem. */
+function acharDiagramacao(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info: MetaDeFace): Diagramacao | null {
+  if (/Saga/i.test(info.tipo)) {
+    const det = acharSaga(g, W, H, meta);
+    return det ? { modo: "saga", det } : null;
   }
+  if (diagramacaoReconhecida(g, W, H, meta)) return { modo: "padrao", dy: 0 };
+  if (meta.frame === "2015" && !basicoDeArteInteira(meta) && !ehAventura(meta)) {
+    const dy = deslocamentoTipo(g, W, H); // barra de tipo mais baixa: tipo e começo da caixa descem juntos
+    if (dy != null) return { modo: "padrao", dy };
+    const liso = linhasFundoLiso(g, W, H);
+    if (liso) return { modo: "liso", det: liso };
+    const painel = barrasPainel(g, W, H);
+    if (painel) return { modo: "painel", det: painel };
+  }
+  const solto = acharTextoSolto(g, W, H, meta); // texto direto sobre a arte, como nas cartas de quadrinho
+  return solto ? { modo: "solto", det: solto } : null;
+}
+
+/**
+ * Molde automático: confere a diagramação da imagem e escolhe o desenho por
+ * ela e pela moldura. Lança `ErroDeDiagramacao` se a arte não tiver uma
+ * diagramação conhecida.
+ */
+function moldeAutomatico(g: Ctx, W: number, H: number, meta: MetaDeImpressao, face: number, info: MetaDeFace, tr: TextoParaDesenhar) {
+  const d = acharDiagramacao(g, W, H, meta, info);
+  if (!d) throw new ErroDeDiagramacao();
+  if (d.modo === "solto") moldeSolto(g, W, H, info, tr, d.det);
+  else if (d.modo === "liso") moldeFundoLiso(g, W, H, info, tr, d.det);
+  else if (d.modo === "saga") moldeSaga(g, W, H, meta, info, tr, d.det);
+  else if (d.modo === "painel") moldePainel(g, W, H, info, tr, d.det);
   // rodapé das molduras antigas: só o ilustrador, sem idioma
-  if (meta.frame === "1993") return moldeAntigo(g, W, H, info, tr);
-  if (meta.frame === "1997" || meta.frame === "2003") return moldeClassico(g, W, H, meta, info, tr);
-  if (basicoDeArteInteira(meta)) moldeBasico(g, W, H, info, tr);
-  else moldeModerno(g, W, H, meta, info, tr);
+  else if (meta.frame === "1993") return moldeAntigo(g, W, H, info, tr);
+  else if (meta.frame === "1997" || meta.frame === "2003") return moldeClassico(g, W, H, meta, info, tr);
+  else if (basicoDeArteInteira(meta)) moldeBasico(g, W, H, info, tr);
+  else if (ehAventura(meta) && tr.aventura && (meta.efeitos ?? []).includes("showcase")) moldeAventuraLivro(g, W, H, meta, tr, tr.aventura);
+  else moldeModerno(g, W, H, meta, face, info, tr, d.dy || ajusteBarra(g, W, H, 0.52, 0.7, 0.571, 0.032, 0.05));
   trocaIdiomaRodape(g, W, H, "PT");
 }
 
 /**
  * Devolve uma cópia da imagem com a tradução. `tr.sabor` só aparece se a arte
- * original tiver ambientação. Com o molde automático, lança `ErroDeDiagramacao`
- * quando a arte tem diagramação especial.
+ * original tiver ambientação. Os símbolos do texto de regras são conferidos
+ * contra o original: se a tradução trocou algum, vale o do original. Com o
+ * molde automático, lança `ErroDeDiagramacao` quando a arte tem diagramação especial.
  */
 export async function renderizarTraducao(
   src: CanvasImageSource & { width: number; height: number },
@@ -850,14 +1162,24 @@ export async function renderizarTraducao(
   const aventura = ehAventura(meta);
   // na aventura a imagem é uma só e a parte 0 (criatura) dá o nome e o tipo da carta
   const info = (aventura ? meta.faces[0] : meta.faces[face]) ?? meta.faces[0];
-  const texto: TextoParaDesenhar = { nome: tr.nome, tipo: tr.tipo, texto: tr.texto, sabor: info.sabor ? tr.sabor : "" };
-  if (aventura && tr.aventura) texto.aventura = { ...tr.aventura, sabor: meta.faces[1].sabor ? tr.aventura.sabor : "" };
+  const texto: TextoParaDesenhar = {
+    nome: tr.nome,
+    tipo: tr.tipo,
+    texto: conferirSimbolos(tr.texto, info.texto).texto,
+    sabor: info.sabor ? tr.sabor : "",
+  };
+  if (aventura && tr.aventura)
+    texto.aventura = {
+      ...tr.aventura,
+      texto: conferirSimbolos(tr.aventura.texto, meta.faces[1].texto).texto,
+      sabor: meta.faces[1].sabor ? tr.aventura.sabor : "",
+    };
   if (aventura && molde === "auto" && !texto.aventura) throw new Error("Falta a tradução de uma das duas partes desta carta de aventura.");
   await carregarSimbolos(texto.texto, texto.sabor, texto.aventura?.texto ?? "", texto.aventura?.sabor ?? "");
   if (molde !== "auto") moldeManual(g, W, H, info, texto, molde);
   else {
     try {
-      moldeAutomatico(g, W, H, meta, info, texto);
+      moldeAutomatico(g, W, H, meta, face, info, texto);
     } catch (e) {
       c.width = c.height = 0;
       throw e;
@@ -1002,7 +1324,7 @@ export function conferirDiagramacao(url: string, meta: MetaDeImpressao): Promise
       const g = c.getContext("2d", { willReadFrequently: true })!;
       g.drawImage(bmp, 0, 0);
       try {
-        return diagramacaoReconhecida(g, c.width, c.height, meta) || acharTextoSolto(g, c.width, c.height, meta) !== null;
+        return acharDiagramacao(g, c.width, c.height, meta, meta.faces[0]) !== null;
       } catch {
         return true;
       } finally {

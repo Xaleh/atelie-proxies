@@ -35,6 +35,8 @@ export type MetaDeImpressao = {
   borda: string;
   fullArt: boolean;
   tipo: string;
+  /** `frame_effects` do Scryfall ("showcase", "extendedart"…). Falta nas impressões guardadas antes de o campo existir. */
+  efeitos?: string[];
   faces: MetaDeFace[];
 };
 
@@ -103,7 +105,7 @@ export function chaveDoSabor(nome: string, set: string, num: string): string {
   return `${chaveDoNome(nome)}|${set.toLowerCase()}|${num}`;
 }
 
-const TIPOS_SEM_MOLDE = /Planeswalker|Saga|Battle|Class|Case|Siege/i;
+const TIPOS_SEM_MOLDE = /Planeswalker|Battle|Class|Case|Siege/i;
 
 const MOLDURAS_ANTIGAS = ["1993", "1997", "2003"];
 
@@ -127,13 +129,15 @@ export function nomesDaFace(meta: MetaDeImpressao | undefined | null, face: numb
 
 /**
  * Molduras que o molde automático sabe reescrever: a moderna (2015, inclusive
- * as aventuras) e as antigas (1993, 1997 e 2003, inclusive as reimpressões
+ * as aventuras e as sagas que transformam; a saga comum tem layout próprio e
+ * fica de fora) e as antigas (1993, 1997 e 2003, inclusive as reimpressões
  * "retrô"), estas só em cartas de layout comum. A moldura certa não basta: na hora de desenhar, o
  * renderizador ainda confere a diagramação da imagem (arte que ocupa a carta
  * toda, por exemplo, fica de fora).
  */
 export function aceitaMoldeAutomatico(meta: MetaDeImpressao | undefined | null): boolean {
   if (!meta || TIPOS_SEM_MOLDE.test(meta.tipo)) return false;
+  if (/Saga/i.test(meta.tipo) && meta.frame !== "2015") return false; // sagas: só a moldura moderna
   if (meta.frame === "2015") return ["normal", "transform", "modal_dfc", "adventure"].includes(meta.layout);
   if (MOLDURAS_ANTIGAS.includes(meta.frame)) return meta.layout === "normal";
   return false;
@@ -166,3 +170,16 @@ export const ROTULO_DA_FONTE: Record<FonteDaTraducao, string> = {
   arena: "Oficial (MTG Arena)",
   oficial: "Oficial (carta impressa)",
 };
+
+/**
+ * Os símbolos (custos, {T}, mana) do texto traduzido têm de ser exatamente os
+ * do original, na mesma ordem. Com a mesma quantidade e algum trocado, devolve
+ * o texto com os símbolos do original (`corrigido`). Com quantidade diferente
+ * não dá para saber qual falta: o texto volta como veio e `ok` é falso.
+ */
+export function conferirSimbolos(pt: string, en: string): { texto: string; ok: boolean; corrigido?: boolean } {
+  const re = /\{[^}]+\}/g, a = String(pt || "").match(re) || [], b = String(en || "").match(re) || [];
+  if (a.length !== b.length || a.every((x, i) => x.toUpperCase() === b[i].toUpperCase())) return { texto: pt, ok: a.length === b.length };
+  let i = 0;
+  return { texto: String(pt).replace(re, () => b[i++]), ok: true, corrigido: true };
+}
