@@ -110,6 +110,22 @@ export const productImages = sqliteTable("product_images", {
   updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
 });
 
+/**
+ * Letras (arquivos de fonte) das cartas traduzidas, uma por encaixe do
+ * renderizador: "titulo", "regras", "regras-italico" e "rodape". Ficam no
+ * banco para não entrarem no repositório; sem linha, vale a fonte livre.
+ */
+export const cardFonts = sqliteTable("card_fonts", {
+  slot: text("slot").primaryKey(),
+  /** Nome do arquivo enviado, só para o painel mostrar. */
+  fileName: text("file_name").notNull(),
+  mime: text("mime").notNull(),
+  data: blob("data", { mode: "buffer" }).notNull(),
+  /** Resumo do conteúdo; entra no endereço para o navegador guardar em cache sem medo. */
+  hash: text("hash").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`(CURRENT_TIMESTAMP)`),
+});
+
 export const payments = sqliteTable(
   "payments",
   {

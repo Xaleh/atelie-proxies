@@ -44,6 +44,7 @@ import {
   type Quadro,
   type RGB,
 } from "./pixels";
+import { ENCAIXE, ehEncaixe, type LetraEnviada } from "../tipografia";
 import {
   basicoDeArteInteira,
   conferirSimbolos,
@@ -59,10 +60,12 @@ type TextoDaParte = { nome: string; tipo: string; texto: string; sabor: string }
 export type TextoParaDesenhar = TextoDaParte & { aventura?: TextoDaParte };
 type Fonte = Ctx | OffscreenCanvasRenderingContext2D;
 
-// Fontes livres: Crimson Pro (títulos e regras) e Inter (rodapé).
-const FONT_T = "'Crimson Pro',Georgia,serif";
-const FONT_R = "'Crimson Pro',Georgia,serif";
-const FONT_F = "Inter,'Helvetica Neue',Arial,sans-serif";
+// A primeira família de cada lista é a fonte que o ateliê envia pelo painel
+// (/admin/fontes); ela só existe na página quando há arquivo enviado. Sem ela,
+// valem as fontes livres: Crimson Pro (títulos e regras) e Inter (rodapé).
+const FONT_T = `'${ENCAIXE.titulo.familia}','Crimson Pro',Georgia,serif`;
+const FONT_R = `'${ENCAIXE.regras.familia}','Crimson Pro',Georgia,serif`;
+const FONT_F = `'${ENCAIXE.rodape.familia}',Inter,'Helvetica Neue',Arial,sans-serif`;
 // Molduras de painel futurista (Star Trek): letras altas e bem estreitas.
 const FONT_CONDENSADA = "'Antonio','Arial Narrow',Arial,sans-serif";
 
@@ -82,15 +85,63 @@ const SYM_COL: Record<string, string> = {
 };
 
 let fontesProntas: Promise<unknown> | null = null;
+let letrasDoPainel: FontFace[] = [];
+let pedirDeNovo = false;
+
+/**
+ * Registra na página as fontes enviadas pelo painel. O arquivo vale para
+ * qualquer peso pedido (o navegador não engrossa a letra por conta própria).
+ * Qualquer falha deixa o encaixe na fonte livre.
+ */
+async function registrarLetrasDoPainel(): Promise<void> {
+  let letras: LetraEnviada[] = [];
+  try {
+    const res = await fetch("/api/fontes", pedirDeNovo ? { cache: "reload" } : undefined);
+    if (res.ok) letras = ((await res.json()) as { letras?: LetraEnviada[] }).letras ?? [];
+  } catch {
+    return;
+  }
+  pedirDeNovo = false;
+  await Promise.all(
+    letras.map(async (l) => {
+      const e = ehEncaixe(l.encaixe) ? ENCAIXE[l.encaixe] : null;
+      if (!e || !/^\/api\/fontes\/[a-z-]+\?v=[0-9a-f]+$/.test(l.url)) return;
+      try {
+        const face = new FontFace(e.familia, `url(${l.url})`, { style: e.italico ? "italic" : "normal", weight: "100 900" });
+        await face.load();
+        document.fonts.add(face);
+        letrasDoPainel.push(face);
+      } catch {
+        // arquivo que o navegador não leu: fica a fonte livre
+      }
+    }),
+  );
+}
+
 export function carregarFontes(): Promise<unknown> {
   if (!fontesProntas) {
-    fontesProntas = Promise.all(
-      [`700 40px ${FONT_T}`, `700 40px ${FONT_CONDENSADA}`, `400 40px ${FONT_R}`, `italic 400 40px ${FONT_R}`, `500 40px ${FONT_F}`].map((f) =>
-        document.fonts.load(f).catch(() => null),
+    fontesProntas = registrarLetrasDoPainel().then(() =>
+      Promise.all(
+        [`700 40px ${FONT_T}`, `700 40px ${FONT_CONDENSADA}`, `400 40px ${FONT_R}`, `italic 400 40px ${FONT_R}`, `500 40px ${FONT_F}`].map((f) =>
+          document.fonts.load(f).catch(() => null),
+        ),
       ),
     );
   }
   return fontesProntas;
+}
+
+/**
+ * Depois de trocar uma fonte no painel: tira as registradas e esquece as
+ * medidas, para o próximo desenho buscar a lista de novo.
+ */
+export function esquecerFontes(): void {
+  for (const face of letrasDoPainel) document.fonts.delete(face);
+  letrasDoPainel = [];
+  fontesProntas = null;
+  pedirDeNovo = true;
+  razaoCap = null;
+  razaoX = null;
 }
 
 function setFont(g: Fonte, size: number, italic = false, weight = 400, fam = FONT_R) {
