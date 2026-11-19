@@ -36,10 +36,18 @@ painel em `/admin`.
   numa arte que só existe em inglês, o site escreve nome, tipo e texto em
   português por cima da arte (selo "PT traduzida"), com prévia na loja e no PDF.
   O texto vem, nesta ordem, da revisão feita no painel, do MTG Arena e da carta
-  impressa em português. As fontes são livres (Crimson Pro e Inter). O site
+  impressa em português. Sem nada enviado, as fontes são livres (Crimson Pro e
+  Inter); em `/admin/fontes` o ateliê pode enviar as suas (veja abaixo). O site
   apaga só as letras em inglês, sem cobrir a caixa, e usa os símbolos de mana
   oficiais que o Scryfall publica (`svgs.scryfall.io`); sem acesso a eles, cai
   num desenho simples.
+- **Fontes das cartas:** em `/admin/fontes`, quatro encaixes (nome e linha de
+  tipo, texto de regras, ambientação e lembretes, rodapé) aceitam um arquivo
+  `.ttf`, `.otf`, `.woff` ou `.woff2` de até 2 MB. O arquivo fica no banco
+  (tabela `card_fonts`) e é entregue por `/api/fontes/<encaixe>`; nenhum arquivo
+  de fonte entra neste repositório. Encaixe vazio usa a fonte livre, e o
+  tamanho do texto se ajusta à fonte pela altura das letras. Só envie fontes
+  que o ateliê tem licença para usar.
 - **Traduções no painel:** em `/admin/traducoes`, importar o
   `traducoes-arena.json` do agente do Arena (a importação substitui a anterior)
   e revisar o texto de qualquer carta.
