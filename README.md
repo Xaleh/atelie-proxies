@@ -9,8 +9,9 @@ painel em `/admin`.
 
 - **Loja:** página inicial e montador com busca por nome (inglês ou português),
   colagem de lista de deck, troca de arte (clicando na carta; a janela traz
-  todas as impressões e filtra por coleção, pelo nome ou pela sigla) e seletor EN/PT
-  por carta.
+  todas as impressões, mostradas aos poucos ao rolar, filtra por coleção, pelo
+  nome ou pela sigla, e as setas ◀ ▶ ou as teclas ← → passam para a carta
+  seguinte sem fechar) e seletor EN/PT por carta.
 - **Lupa:** com o mouse parado em cima de uma carta, ela aparece ampliada ao
   lado do cursor; no celular, segurar o dedo um segundo abre a carta no meio
   da tela. Vale nas cartas do pedido, na janela de artes e na grade da
@@ -32,6 +33,16 @@ painel em `/admin`.
   carta abre as artes dela para trocar a daquela cópia ou a de todas as cópias
   no lote; a troca vale para a impressão e não muda o pedido gravado. A geometria e as marcas de registro são as mesmas do site de
   produção anterior, então o gabarito da Silhouette Portrait 4 continua valendo.
+- **Fichas e imagens próprias na produção:** "Incluir as fichas dessas cartas"
+  (marcado por padrão) põe as fichas de cada carta avulsa no fim do lote, e o
+  botão "Adicionar fichas das cartas" faz o mesmo para o lote inteiro, só com as
+  que faltam (`/api/admin/fichas`, pelo `all_parts` do Scryfall). Em "Imagens
+  próprias", o ateliê envia a arte pronta de uma carta (JPG, PNG ou WEBP, várias
+  de uma vez ou arrastando): a sangria de 3 mm da MPC é cortada, a imagem fica no
+  formato 63 × 88 (cortando as sobras ou encaixando com borda preta), avisa
+  abaixo de 280 dpi e fica guardada no IndexedDB deste navegador para o lote
+  reabrir com ela (`src/lib/print/imagens-proprias.ts`). Essas cartas não são
+  traduzidas nem trocam de arte.
 - **Texto em português sobre a arte em inglês:** quando a cliente escolhe PT
   numa arte que só existe em inglês, o site escreve nome, tipo e texto em
   português por cima da arte (selo "PT traduzida"), com prévia na loja e no PDF.

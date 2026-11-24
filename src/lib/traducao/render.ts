@@ -47,6 +47,7 @@ import {
 import { ENCAIXE, ehEncaixe, type LetraEnviada } from "../tipografia";
 import {
   basicoDeArteInteira,
+  basicoComMoldura,
   conferirSimbolos,
   ehAventura,
   type MetaDeFace,
@@ -624,6 +625,8 @@ function moldeModerno(g: Ctx, W: number, H: number, meta: MetaDeImpressao, face:
   const yx1 = Math.min(Ty.x1 * W, lfT.livre < 0.94 * W ? lfT.livre - 0.006 * W : W); // nunca chega no símbolo da coleção
   trocarTextoBarra(g, W, H, tr.tipo || info.tipo, Ty.base * H, Ty.cap * H, yy0, yy1, { x0: 0.06 * W, x1: yx1 }, yx1, Ty.tx * W);
   if (ehAventura(meta) && tr.aventura) return moldeAventura(g, W, H, meta, tr, tr.aventura);
+  // terreno básico com moldura comum: a caixa só tem o símbolo grande de mana e fica como está
+  if (basicoComMoldura(meta)) return;
   // caixa de texto
   const T = { ...GEO.text, y0: GEO.text.y0 + dy }, ext = extensaoTexto(g, GEO.text.x0 * W, (GEO.text.y0 + dy) * H, GEO.text.x1 * W, 0.88 * H);
   // a limpeza começa um pouco antes da primeira letra: a moldura em volta da caixa fica intacta
@@ -1015,6 +1018,8 @@ function moldeClassico(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info
       ate: 0.83 * W,
       sombra: !moderna,
     });
+  // terreno básico com moldura comum: a caixa só tem o símbolo grande de mana e fica como está
+  if (basicoComMoldura(meta)) return;
   // caixa de texto: apaga só as letras (a textura e a cor da caixa ficam); antes de 2003 não havia marca d'água
   const m = 0.012 * W;
   const op: OpcoesDeLimpeza = { marca: moderna ? undefined : false, circulos: true };
@@ -1045,7 +1050,7 @@ function moldeClassico(g: Ctx, W: number, H: number, meta: MetaDeImpressao, info
  * texto com textura. Os scans variam, então o nome é procurado logo acima da
  * ilustração e o tipo logo abaixo.
  */
-function moldeAntigo(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoParaDesenhar) {
+function moldeAntigo(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoParaDesenhar, soNomeETipo = false) {
   const linha = (txt: string, faixa: Faixa, capMin: number, capMax: number) => {
     const t = acharTinta(g, ...faixa);
     if (!t) return;
@@ -1075,6 +1080,8 @@ function moldeAntigo(g: Ctx, W: number, H: number, info: MetaDeFace, tr: TextoPa
     0.027,
   );
   linha(tr.tipo || info.tipo, [0.06 * W, 0.559 * H, 0.72 * W, 0.598 * H], 0.016, 0.021);
+  // terreno básico: a caixa só tem o símbolo grande de mana e fica como está
+  if (soNomeETipo) return;
   const cx = { x0: 0.113 * W, x1: 0.897 * W, y0: 0.606 * H, y1: 0.874 * H };
   const corDaCaixa = mediana(g, 0.2 * W, 0.62 * H, 0.6 * W, 0.23 * H);
   const { centrado, altura } = textoCentralizado(g, cx.x0, cx.y0, cx.x1, cx.y1);
@@ -1182,7 +1189,7 @@ function moldeAutomatico(g: Ctx, W: number, H: number, meta: MetaDeImpressao, fa
   else if (d.modo === "saga") moldeSaga(g, W, H, meta, info, tr, d.det);
   else if (d.modo === "painel") moldePainel(g, W, H, info, tr, d.det);
   // rodapé das molduras antigas: só o ilustrador, sem idioma
-  else if (meta.frame === "1993") return moldeAntigo(g, W, H, info, tr);
+  else if (meta.frame === "1993") return moldeAntigo(g, W, H, info, tr, basicoComMoldura(meta));
   else if (meta.frame === "1997" || meta.frame === "2003") return moldeClassico(g, W, H, meta, info, tr);
   else if (basicoDeArteInteira(meta)) moldeBasico(g, W, H, info, tr);
   else if (ehAventura(meta) && tr.aventura && (meta.efeitos ?? []).includes("showcase")) moldeAventuraLivro(g, W, H, meta, tr, tr.aventura);
