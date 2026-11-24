@@ -45,6 +45,8 @@ type ScryfallCard = ScryfallFace & {
   full_art?: boolean;
   frame_effects?: string[];
   card_faces?: ScryfallFace[];
+  /** Cartas ligadas a esta: fichas que ela cria, a outra metade de um combo etc. */
+  all_parts?: Array<{ id: string; component?: string; name?: string }>;
 };
 
 type ScryfallList = { data?: ScryfallCard[]; has_more?: boolean; total_cards?: number; not_found?: Array<{ name?: string }> };
@@ -195,28 +197,87 @@ async function collection(
 export async function detalhesDasImpressoes(ids: string[]): Promise<DetalheDeImpressao[]> {
   const unicos = [...new Set(ids)];
   const { cards } = await collectionBruta(unicos.map((id) => ({ id })));
-  return cards.map((c) => {
-    const faces: FaceDeImpressao[] = [];
-    if (c.image_uris?.normal && c.image_uris.png) {
-      faces.push({ nome: c.printed_name ?? c.name, normal: c.image_uris.normal, png: c.image_uris.png });
-    } else {
-      for (const f of c.card_faces ?? []) {
-        if (f.image_uris?.normal && f.image_uris.png) {
-          faces.push({ nome: f.printed_name ?? f.name ?? c.name, normal: f.image_uris.normal, png: f.image_uris.png });
-        }
+  return cards.map(detalheDe);
+}
+
+/** Uma carta do Scryfall no formato da produção: todas as faces, com a imagem de tela e o PNG. */
+function detalheDe(c: ScryfallCard): DetalheDeImpressao {
+  const faces: FaceDeImpressao[] = [];
+  if (c.image_uris?.normal && c.image_uris.png) {
+    faces.push({ nome: c.printed_name ?? c.name, normal: c.image_uris.normal, png: c.image_uris.png });
+  } else {
+    for (const f of c.card_faces ?? []) {
+      if (f.image_uris?.normal && f.image_uris.png) {
+        faces.push({ nome: f.printed_name ?? f.name ?? c.name, normal: f.image_uris.normal, png: f.image_uris.png });
       }
     }
-    return {
-      id: c.id,
-      oracleId: c.oracle_id ?? c.card_faces?.[0]?.oracle_id,
-      nome: c.name,
-      lang: c.lang,
-      set: c.set,
-      collectorNumber: c.collector_number,
-      faces,
-      meta: metaDaImpressao(c),
-    };
-  });
+  }
+  return {
+    id: c.id,
+    oracleId: c.oracle_id ?? c.card_faces?.[0]?.oracle_id,
+    nome: c.name,
+    lang: c.lang,
+    set: c.set,
+    collectorNumber: c.collector_number,
+    faces,
+    meta: metaDaImpressao(c),
+  };
+}
+
+/** Ids das fichas (tokens) que a carta cria, como o Scryfall lista em `all_parts`. */
+function fichasDe(c: ScryfallCard): string[] {
+  return (c.all_parts ?? []).filter((p) => p.component === "token" && p.id !== c.id).map((p) => p.id);
+}
+
+/** O texto da carta fala em criar fichas (em inglês ou em português)? */
+function falaDeFicha(c: ScryfallCard): boolean {
+  return facesDaCarta(c).some((f) => /\b(tokens?|fichas?)\b/i.test(`${f.oracle_text ?? ""} ${f.printed_text ?? ""}`));
+}
+
+/**
+ * Fichas que as cartas do lote criam, uma de cada, já no formato da produção.
+ * `idiomas` diz em que idioma cada carta foi pedida: carta em português ganha
+ * a ficha impressa em português quando ela existe; senão, a ficha em inglês.
+ *
+ * Impressões em português às vezes vêm sem a lista de fichas: nesse caso, se o
+ * texto fala em ficha, vale a lista da versão em inglês (pelo oracle_id).
+ */
+export async function fichasDasCartas(ids: string[], idiomas: Record<string, string> = {}): Promise<DetalheDeImpressao[]> {
+  const { cards } = await collectionBruta([...new Set(ids)].map((id) => ({ id })));
+  const fichas = new Map<string, boolean>(); // id da ficha → pedida em português
+  const semLista: ScryfallCard[] = [];
+  for (const c of cards) {
+    const lista = fichasDe(c);
+    if (!lista.length && c.lang !== "en" && falaDeFicha(c)) semLista.push(c);
+    for (const f of lista) fichas.set(f, Boolean(fichas.get(f)) || idiomas[c.id] === "pt" || c.lang === "pt");
+  }
+  const oracles = [...new Set(semLista.map((c) => c.oracle_id ?? c.card_faces?.[0]?.oracle_id).filter((o): o is string => Boolean(o)))];
+  if (oracles.length) {
+    const emIngles = await collectionBruta(oracles.map((oracle_id) => ({ oracle_id })));
+    for (const c of emIngles.cards) for (const f of fichasDe(c)) fichas.set(f, true);
+  }
+  if (!fichas.size) return [];
+  const { cards: emIngles } = await collectionBruta([...fichas.keys()].map((id) => ({ id })));
+  // fichas pedidas em português: procura a mesma ficha impressa em português
+  const querPt = emIngles.filter((f) => fichas.get(f.id) && f.oracle_id);
+  const pt = new Map<string, ScryfallCard>();
+  for (let i = 0; i < querPt.length; i += 20) {
+    if (i > 0) await pausa(100);
+    const grupo = querPt.slice(i, i + 20).map((f) => `oracleid:${f.oracle_id}`).join(" or ");
+    const achadas = await searchBruta(`lang:pt include:extras (${grupo})`, { unique: "prints", order: "released", dir: "desc" }).catch(() => []);
+    for (const f of achadas) if (f.oracle_id && !pt.has(f.oracle_id)) pt.set(f.oracle_id, f);
+  }
+  // uma ficha de cada tipo, mesmo que várias cartas criem a mesma
+  const vistas = new Set<string>();
+  const out: DetalheDeImpressao[] = [];
+  for (const f of emIngles) {
+    const chave = f.oracle_id ?? f.id;
+    if (vistas.has(chave)) continue;
+    vistas.add(chave);
+    const d = detalheDe((fichas.get(f.id) && f.oracle_id && pt.get(f.oracle_id)) || f);
+    if (d.faces.length) out.push(d);
+  }
+  return out;
 }
 
 /**
@@ -326,10 +387,11 @@ const MAX_PAGINAS_DE_ARTES = 12;
 /**
  * Todas as artes de uma carta, em inglês e em português, da mais nova para a
  * mais antiga. Busca todas as páginas, para o filtro por coleção da janela de
- * artes alcançar também as coleções antigas.
+ * artes alcançar também as coleções antigas. `include:extras` traz também as
+ * fichas (tokens), que o Scryfall esconde da busca comum.
  */
 export async function buscarImpressoes(oracleId: string): Promise<CardPrint[]> {
-  return searchCompleta(`oracleid:${oracleId} (lang:en or lang:pt)`, { unique: "prints", order: "released", dir: "desc" }, MAX_PAGINAS_DE_ARTES);
+  return searchCompleta(`oracleid:${oracleId} (lang:en or lang:pt) include:extras`, { unique: "prints", order: "released", dir: "desc" }, MAX_PAGINAS_DE_ARTES);
 }
 
 export const HOSTS_DE_IMAGEM = ["cards.scryfall.io"];

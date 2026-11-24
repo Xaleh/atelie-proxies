@@ -20,6 +20,7 @@ import {
   detalheDaFrente,
   duplicarGrupo,
   grupoDe,
+  juntarFichas,
   montarSlots,
   moverSlot,
   moverUmaPosicao,
@@ -27,10 +28,23 @@ import {
   proximoGrupo,
   tirarGrupo,
   trocarArte,
+  ORIGEM_FICHA,
   type DetalheDeImpressao,
   type PedidoDoLote,
   type Slot,
 } from "@/lib/print/lote";
+import {
+  DPI_MINIMO,
+  PREFIXO,
+  apagarImagensFora,
+  ehImagemPropria,
+  guardarImagem,
+  lerImagens,
+  prepararImagem,
+  slotDaImagem,
+  type Encaixe,
+  type Sangria,
+} from "@/lib/print/imagens-proprias";
 import { baixarArquivo, gerarPdf, type TraducaoDoSlot } from "@/lib/print/pdf";
 import { conferirSimbolos, ehAventura, facesFisicas } from "@/lib/traducao/tipos";
 import { pedidosDaFace, useTraducoes } from "@/lib/traducao/cliente";
@@ -39,8 +53,25 @@ import { previaTraduzida } from "@/lib/traducao/render";
 import type { CardPrint, CatalogEntry } from "@/lib/types";
 
 const CHAVE_AJUSTES = "proxy-do-reis:producao:ajustes:v1";
-const chaveDoLote = (pedidos: PedidoDoLote[]) =>
-  "proxy-do-reis:producao:lote:v2:" + (pedidos.map((p) => p.code).sort().join("+") || "avulso");
+const PREFIXO_DO_LOTE = "proxy-do-reis:producao:lote:v2:";
+const chaveDoLote = (pedidos: PedidoDoLote[]) => PREFIXO_DO_LOTE + (pedidos.map((p) => p.code).sort().join("+") || "avulso");
+/** "Incluir as fichas dessas cartas", lembrado entre visitas. */
+const CHAVE_FICHAS = "addTokens";
+
+/** Imagens próprias usadas em algum lote guardado neste navegador (as outras podem sair do IndexedDB). */
+function imagensEmUso(): Set<string> {
+  const ids = new Set<string>();
+  try {
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (!k?.startsWith(PREFIXO_DO_LOTE)) continue;
+      for (const sl of ler<Slot[]>(k) ?? []) if (sl.printId?.startsWith(PREFIXO)) ids.add(sl.printId);
+    }
+  } catch {
+    // sem armazenamento: nada para limpar
+  }
+  return ids;
+}
 
 function ler<T>(chave: string): T | null {
   try {
@@ -174,7 +205,15 @@ function Folha({
   );
 }
 
-function Avulsa({ onAdd }: { onAdd: (entry: CatalogEntry, lang: "en" | "pt") => void }) {
+function Avulsa({
+  onAdd,
+  comFichas,
+  onComFichas,
+}: {
+  onAdd: (entry: CatalogEntry, lang: "en" | "pt") => void;
+  comFichas: boolean;
+  onComFichas: (v: boolean) => void;
+}) {
   const [termo, setTermo] = useState("");
   const [resultados, setResultados] = useState<CatalogEntry[]>([]);
   const [estado, setEstado] = useState("");
@@ -213,6 +252,10 @@ function Avulsa({ onAdd }: { onAdd: (entry: CatalogEntry, lang: "en" | "pt") => 
         </label>
         <input id="avulsa" type="search" autoComplete="off" className="field min-h-11" value={termo} onChange={(e) => setTermo(e.target.value)} />
       </div>
+      <label className="flex min-h-11 items-center gap-2.5">
+        <input type="checkbox" checked={comFichas} onChange={(e) => onComFichas(e.target.checked)} />
+        Incluir as fichas dessas cartas
+      </label>
       <div aria-live="polite" className="min-h-5 text-muted">
         {estado}
       </div>
@@ -237,6 +280,113 @@ function Avulsa({ onAdd }: { onAdd: (entry: CatalogEntry, lang: "en" | "pt") => 
   );
 }
 
+/** Seção "Imagens próprias": a arte pronta de uma carta, enviada do computador. */
+function ImagensProprias({ onAdd }: { onAdd: (imagens: { id: string; nome: string; url: string }[], copias: number) => void }) {
+  const [copias, setCopias] = useState(1);
+  const [sangria, setSangria] = useState<Sangria>("auto");
+  const [encaixe, setEncaixe] = useState<Encaixe>("cortar");
+  const [sobre, setSobre] = useState(false);
+  const [trabalhando, setTrabalhando] = useState(false);
+  const [mensagens, setMensagens] = useState<string[]>([]);
+  const input = useRef<HTMLInputElement>(null);
+
+  async function receber(lista: FileList | File[]) {
+    const arquivos = [...lista];
+    if (!arquivos.length) return;
+    setTrabalhando(true);
+    setMensagens([`Preparando ${arquivos.length} ${arquivos.length === 1 ? "imagem" : "imagens"}…`]);
+    const prontas: { id: string; nome: string; url: string }[] = [];
+    const baixas: string[] = [];
+    const ruins: string[] = [];
+    for (const arq of arquivos) {
+      if (!/^image\/(png|jpeg|webp)$/.test(arq.type) && !/\.(jpe?g|png|webp)$/i.test(arq.name)) {
+        ruins.push(arq.name);
+        continue;
+      }
+      try {
+        const img = await prepararImagem(arq, sangria, encaixe);
+        await guardarImagem(img).catch(() => undefined); // sem IndexedDB, a imagem vale só nesta aba
+        prontas.push({ id: img.id, nome: img.nome, url: URL.createObjectURL(img.blob) });
+        if (img.dpi < DPI_MINIMO) baixas.push(`${arq.name} (${img.dpi} dpi)`);
+      } catch {
+        ruins.push(arq.name);
+      }
+    }
+    if (prontas.length) onAdd(prontas, copias);
+    const n = prontas.length * copias;
+    const msgs: string[] = [];
+    if (n) msgs.push(`${n} ${n === 1 ? "carta adicionada" : "cartas adicionadas"} no fim do lote.`);
+    if (baixas.length)
+      msgs.push(`Resolução baixa: ${baixas.join(", ")}. O ideal é a partir de 300 dpi (cerca de 745 × 1040 pixels); abaixo disso a carta pode sair borrada.`);
+    if (ruins.length) msgs.push(`Não consegui abrir: ${ruins.join(", ")}. Envie em JPG, PNG ou WEBP.`);
+    setMensagens(msgs);
+    setTrabalhando(false);
+  }
+
+  return (
+    <div className="panel flex flex-col gap-3 p-5">
+      <h2 className="text-[15px] font-bold">Imagens próprias</h2>
+      <p className="text-muted">A arte pronta de uma carta, do seu computador. Ela entra no fim do lote como está, sem tradução.</p>
+      <div
+        className={`flex flex-col items-center gap-1 rounded-xl border-2 border-dashed p-5 text-center ${sobre ? "border-gold bg-gold/10" : "border-edge"}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setSobre(true);
+        }}
+        onDragLeave={() => setSobre(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setSobre(false);
+          if (!trabalhando) void receber(e.dataTransfer.files);
+        }}
+      >
+        <button type="button" className="btn btn-ghost px-4 text-sm" disabled={trabalhando} onClick={() => input.current?.click()}>
+          Escolher imagens
+        </button>
+        <span className="text-sm text-muted">ou arraste os arquivos para cá</span>
+        <input
+          ref={input}
+          type="file"
+          multiple
+          accept="image/png,image/jpeg,image/webp"
+          className="sr-only"
+          tabIndex={-1}
+          aria-label="Imagens das cartas"
+          onChange={(e) => {
+            if (e.target.files) void receber(e.target.files);
+            e.target.value = "";
+          }}
+        />
+      </div>
+      <Numero id="copias-img" rotulo="Cópias de cada" valor={copias} passo={1} min={1} max={99} onChange={(n) => setCopias(Math.round(n) || 1)} />
+      <div>
+        <label htmlFor="sangria-img" className="label">
+          Sangria na imagem
+        </label>
+        <select id="sangria-img" className="field min-h-11" value={sangria} onChange={(e) => setSangria(e.target.value as Sangria)}>
+          <option value="auto">Automática</option>
+          <option value="sem">Sem sangria</option>
+          <option value="mpc">Com 3 mm (MPC)</option>
+        </select>
+      </div>
+      <div>
+        <label htmlFor="encaixe-img" className="label">
+          Se a imagem não tiver o formato de carta
+        </label>
+        <select id="encaixe-img" className="field min-h-11" value={encaixe} onChange={(e) => setEncaixe(e.target.value as Encaixe)}>
+          <option value="cortar">Cortar as sobras</option>
+          <option value="encaixar">Encaixar inteira, com borda preta</option>
+        </select>
+      </div>
+      <div aria-live="polite" className="flex flex-col gap-1 text-muted">
+        {mensagens.map((m) => (
+          <p key={m}>{m}</p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
   const chave = useMemo(() => chaveDoLote(pedidos), [pedidos]);
   const [ajustes, setAjustes] = useState<Ajustes>(AJUSTES_PADRAO);
@@ -249,6 +399,9 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
   const arrastando = useRef<number | null>(null);
   /** Carta com a troca de arte aberta (pelo grupo) e se a troca vale para todas as cópias. */
   const [trocando, setTrocando] = useState<{ grupo: number; todas: boolean } | null>(null);
+  const [comFichas, setComFichas] = useState(true);
+  const [statusFichas, setStatusFichas] = useState("");
+  const [buscandoFichas, setBuscandoFichas] = useState(false);
 
   // Abre o lote: ajustes e ordem salvos neste navegador, mais os detalhes das cartas no Scryfall.
   useEffect(() => {
@@ -258,7 +411,7 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
       const loteSalvo = ler<Slot[]>(chave);
       const ids = [
         ...new Set([...pedidos.flatMap((p) => p.itens.map((i) => i.printId)), ...(loteSalvo ?? []).map((s) => s.printId)]),
-      ];
+      ].filter((id) => !id.startsWith(PREFIXO)); // imagens próprias não estão no Scryfall
       const mapa = new Map<string, DetalheDeImpressao>();
       if (ids.length) {
         try {
@@ -274,11 +427,25 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
           if (vivo) setAviso("Não consegui consultar o Scryfall. O lote abriu só com a frente das cartas; recarregue para tentar de novo.");
         }
       }
+      // imagens próprias: o endereço da imagem vale só enquanto a aba está aberta; ao reabrir, vem do IndexedDB
+      let lote = loteSalvo;
+      const idsProprios = (loteSalvo ?? []).filter(ehImagemPropria).map((sl) => sl.printId);
+      if (lote && idsProprios.length) {
+        const guardadas = await lerImagens(idsProprios).catch(() => new Map<string, { nome: string; blob: Blob }>());
+        const urls = new Map([...guardadas].map(([id, g]) => [id, URL.createObjectURL(g.blob)]));
+        const faltam = new Set(idsProprios.filter((id) => !urls.has(id)));
+        lote = lote
+          .filter((sl) => !faltam.has(sl.printId))
+          .map((sl) => (urls.has(sl.printId) ? { ...sl, thumb: urls.get(sl.printId)!, png: urls.get(sl.printId)! } : sl));
+        if (faltam.size && vivo)
+          setAviso(`${faltam.size} ${faltam.size === 1 ? "imagem própria saiu" : "imagens próprias saíram"} do lote: não estão guardadas neste navegador. Envie de novo em Imagens próprias.`);
+      }
       if (!vivo) return;
+      setComFichas(ler<boolean>(CHAVE_FICHAS) ?? true);
       setAjustes(ajustesSalvos);
       setDetalhes(mapa);
       // lotes guardados antes de o verso ser obrigatório ganham o verso logo depois da frente
-      setSlots(loteSalvo ? completarVersos(loteSalvo, mapa) : montarSlots(pedidos, mapa));
+      setSlots(lote ? completarVersos(lote, mapa) : montarSlots(pedidos, mapa));
     })();
     return () => {
       vivo = false;
@@ -286,7 +453,12 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
   }, [chave, pedidos]);
 
   useEffect(() => {
-    if (slots) gravar(chave, slots);
+    if (!slots) return;
+    gravar(chave, slots);
+    // as imagens próprias que saíram de todos os lotes deste navegador saem também do IndexedDB
+    const manter = imagensEmUso();
+    for (const sl of slots) if (ehImagemPropria(sl)) manter.add(sl.printId);
+    void apagarImagensFora(manter).catch(() => undefined);
   }, [chave, slots]);
 
   const lista = slots ?? [];
@@ -347,6 +519,8 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
     return "PT traduzida";
   };
   const semTraducao = lista.filter((sl) => sl.traduzida && !traducaoDe(sl)).length;
+  // cartas pedidas em português cuja arte tem diagramação especial: saem em inglês
+  const ficamEmIngles = [...new Set(lista.filter((sl) => sl.traduzida && arteEspecial(sl)).map((sl) => sl.nome))];
   // Tradução com quantidade de símbolos ({T}, custos…) diferente do original: o site não sabe qual falta.
   const simbolosDiferentes = [
     ...new Set(
@@ -417,6 +591,7 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
       origem: "avulsa",
     };
     setSlots(completarVersos([...lista, frente], detalhes));
+    if (comFichas) void adicionarFichas([{ printId: print.id, lang }]);
     if (detalhes.has(print.id)) return;
     if (facesFisicas(print.meta) < 2) {
       // a moldura da carta fica à mão para o botão PT funcionar sem recarregar
@@ -441,6 +616,58 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
     }
   }
 
+  /**
+   * Procura as fichas (tokens) que as cartas criam e põe no fim do lote só as
+   * que ainda não estão nele. Sem `cartas`, vale para o lote inteiro.
+   */
+  async function adicionarFichas(cartas?: { printId: string; lang: string }[]) {
+    const fonte = (cartas ?? lista.filter((sl) => sl.face === 0 && sl.origem !== ORIGEM_FICHA)).filter((c) => !c.printId.startsWith(PREFIXO));
+    if (!fonte.length) {
+      setStatusFichas("Nenhuma ficha nova: as cartas do lote não criam fichas, ou elas já estão no lote.");
+      return;
+    }
+    setBuscandoFichas(true);
+    setStatusFichas("Procurando as fichas…");
+    try {
+      const idiomas: Record<string, string> = {};
+      for (const c of fonte) if (c.lang === "pt" || !idiomas[c.printId]) idiomas[c.printId] = c.lang;
+      const res = await fetch("/api/admin/fichas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Object.keys(idiomas), idiomas }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { fichas?: DetalheDeImpressao[]; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Não consegui procurar as fichas.");
+      const fichas = data.fichas ?? [];
+      setDetalhes((atual) => {
+        const mapa = new Map(atual);
+        for (const f of fichas) mapa.set(f.id, f);
+        return mapa;
+      });
+      // a conta da mensagem usa o lote da tela; a junção de verdade usa o lote mais recente
+      const novas = juntarFichas(lista, fichas).novas;
+      setSlots((atual) => (atual ? juntarFichas(atual, fichas).slots : atual));
+      setStatusFichas(
+        novas
+          ? `${novas} ${novas === 1 ? "ficha adicionada" : "fichas adicionadas"} no fim do lote.`
+          : "Nenhuma ficha nova: as cartas do lote não criam fichas, ou elas já estão no lote.",
+      );
+    } catch (e) {
+      setStatusFichas((e as Error).message);
+    } finally {
+      setBuscandoFichas(false);
+    }
+  }
+
+  function adicionarImagens(imagens: { id: string; nome: string; url: string }[], copias: number) {
+    setSlots((atual) => {
+      const base = atual ?? [];
+      let grupo = proximoGrupo(base);
+      const novas = imagens.flatMap((img) => Array.from({ length: copias }, () => slotDaImagem(img, img.url, grupo++)));
+      return [...base, ...novas];
+    });
+  }
+
   // A troca de arte precisa do oracle_id; lotes antigos podem ter guardado a carta sem ele.
   const oracleDe = (sl: Slot) => sl.oracleId || detalhes.get(sl.printId)?.oracleId || "";
   const abrirTroca = (sl: Slot) => {
@@ -448,6 +675,16 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
   };
   const posicaoTrocando = trocando ? lista.findIndex((sl) => sl.grupo === trocando.grupo) : -1;
   const cartaTrocando = posicaoTrocando >= 0 ? lista[posicaoTrocando] : null;
+  // as setas da janela de artes passam pelas cartas do lote (a frente de cada cópia), na ordem das folhas
+  const frentes = lista.filter((sl) => sl.face === 0 && oracleDe(sl));
+  const navegacaoDeArtes = {
+    posicao: trocando ? frentes.findIndex((sl) => sl.grupo === trocando.grupo) : -1,
+    total: frentes.length,
+    irPara: (n: number) => {
+      const sl = frentes[n];
+      if (sl) setTrocando({ grupo: sl.grupo, todas: false });
+    },
+  };
 
   async function escolherArte(print: CardPrint) {
     if (!trocando) return;
@@ -541,6 +778,12 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
       {aviso && (
         <p role="status" className="panel border-gold p-4">
           {aviso}
+        </p>
+      )}
+      {ficamEmIngles.length > 0 && (
+        <p role="status" className="panel border-gold p-4">
+          Ficam em inglês: {ficamEmIngles.join(", ")}. A arte escolhida tem diagramação especial (arte que ocupa a carta toda, moldura de
+          quadrinho…). Para traduzir, clique na carta (ou use Arte) e escolha uma impressão com moldura comum.
         </p>
       )}
       {semTraducao > 0 && (
@@ -661,7 +904,7 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
                           <img src={imagemDe(sl)} alt={sl.nome} loading="lazy" draggable={false} data-lupa className="aspect-[63/88] w-full rounded-lg bg-ink object-cover" />
                         )}
                         <span className="truncate text-xs text-muted">
-                          {[sl.face > 0 ? "verso" : "", situacaoPT(sl) ?? sl.lang.toUpperCase(), sl.origem].filter(Boolean).join(" · ")}
+                          {[sl.face > 0 ? "verso" : "", ehImagemPropria(sl) ? "" : (situacaoPT(sl) ?? sl.lang.toUpperCase()), sl.origem].filter(Boolean).join(" · ")}
                         </span>
                         {emIngles(sl) && (
                           <div className="grid grid-cols-2 gap-1">
@@ -744,6 +987,17 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
           </div>
 
           <div className="panel flex flex-col gap-3 p-5">
+            <h2 className="text-[15px] font-bold">Fichas</h2>
+            <p className="text-muted">Procura as fichas (tokens) que as cartas do lote criam e põe no fim só as que ainda não estão nele.</p>
+            <button type="button" className="btn btn-ghost" disabled={buscandoFichas || !lista.length} onClick={() => void adicionarFichas()}>
+              Adicionar fichas das cartas
+            </button>
+            <p role="status" className="min-h-5 text-muted">
+              {statusFichas}
+            </p>
+          </div>
+
+          <div className="panel flex flex-col gap-3 p-5">
             <h2 className="text-[15px] font-bold">Ajuste de corte</h2>
             <p className="text-muted">
               Se o corte sair deslocado igual em todas as cartas, mova a impressão. Positivo vai para a direita e para
@@ -798,7 +1052,16 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
             </div>
           </details>
 
-          <Avulsa onAdd={adicionarAvulsa} />
+          <Avulsa
+            onAdd={adicionarAvulsa}
+            comFichas={comFichas}
+            onComFichas={(v) => {
+              setComFichas(v);
+              gravar(CHAVE_FICHAS, v);
+            }}
+          />
+
+          <ImagensProprias onAdd={adicionarImagens} />
 
           <details className="panel p-5">
             <summary className="min-h-11 cursor-pointer text-[15px] font-bold">Gabarito para o Silhouette Studio</summary>
@@ -834,12 +1097,12 @@ export function Producao({ pedidos }: { pedidos: PedidoDoLote[] }) {
 
       {trocando && cartaTrocando && (
         <EscolhaDeArte
-          key={trocando.grupo}
           oracleId={oracleDe(cartaTrocando)}
           nome={cartaTrocando.nome}
           atualId={cartaTrocando.printId}
           onEscolher={escolherArte}
           onClose={() => setTrocando(null)}
+          navegacao={navegacaoDeArtes.posicao >= 0 ? navegacaoDeArtes : undefined}
         >
           {copiasDaCarta(lista, posicaoTrocando) > 1 ? (
             <label className="flex min-h-11 items-center gap-2.5">

@@ -254,3 +254,48 @@ export function tirarGrupo(slots: Slot[], i: number): Slot[] {
 export function proximoGrupo(slots: Slot[]): number {
   return slots.reduce((m, sl) => Math.max(m, sl.grupo), 0) + 1;
 }
+
+/**
+ * Uma carta nova no fim do lote, com todas as faces (frente e verso no mesmo
+ * grupo). Serve para as fichas e para as imagens próprias.
+ */
+export function slotsDoDetalhe(detalhe: DetalheDeImpressao, grupo: number, origem: string, lang = detalhe.lang): Slot[] {
+  return detalhe.faces.map((f, face) => ({
+    uid: `${grupo}-${face}`,
+    grupo,
+    printId: detalhe.id,
+    oracleId: detalhe.oracleId ?? "",
+    face,
+    nomeEn: detalhe.meta?.faces[face]?.nome ?? detalhe.nome.split(" // ")[face] ?? detalhe.nome,
+    set: detalhe.set,
+    num: detalhe.collectorNumber,
+    traduzida: false,
+    nome: f.nome,
+    lang,
+    thumb: f.normal,
+    png: f.png,
+    origem,
+  }));
+}
+
+/** Etiqueta das fichas no lote. */
+export const ORIGEM_FICHA = "ficha";
+
+/**
+ * Põe no fim do lote as fichas que ainda não estão nele (uma de cada).
+ * Devolve o lote novo e quantas entraram.
+ */
+export function juntarFichas(slots: Slot[], fichas: DetalheDeImpressao[]): { slots: Slot[]; novas: number } {
+  const jaTem = new Set(slots.map((sl) => sl.oracleId || sl.printId));
+  let grupo = proximoGrupo(slots);
+  const out = [...slots];
+  let novas = 0;
+  for (const f of fichas) {
+    const chave = f.oracleId || f.id;
+    if (jaTem.has(chave) || !f.faces.length) continue;
+    jaTem.add(chave);
+    out.push(...slotsDoDetalhe(f, grupo++, ORIGEM_FICHA));
+    novas++;
+  }
+  return { slots: novas ? out : slots, novas };
+}

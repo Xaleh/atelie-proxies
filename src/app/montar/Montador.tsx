@@ -188,9 +188,8 @@ function Lista() {
   );
 }
 
-function Tile({ item, sit }: { item: CartItem; sit: Situacao }) {
-  const { escolherArte, mudarIdioma, mudarQuantidade, remover } = useCart();
-  const [artes, setArtes] = useState(false);
+function Tile({ item, sit, onArtes }: { item: CartItem; sit: Situacao; onArtes: () => void }) {
+  const { mudarIdioma, mudarQuantidade, remover } = useCart();
   const { print, modo } = sit;
   const emPt = item.lang === "pt";
   const nomePt = modo === "traduzida" ? sit.tr?.nome : modo === "oficial" ? print.printedName : (item.pt?.printedName ?? sit.tr?.nome);
@@ -214,7 +213,7 @@ function Tile({ item, sit }: { item: CartItem; sit: Situacao }) {
           type="button"
           aria-label={`Trocar a arte de ${item.name}`}
           className="absolute inset-0 flex cursor-pointer items-start justify-end rounded-[9px] p-2"
-          onClick={() => setArtes(true)}
+          onClick={onArtes}
         >
           <span
             aria-hidden="true"
@@ -276,19 +275,10 @@ function Tile({ item, sit }: { item: CartItem; sit: Situacao }) {
             +
           </button>
         </div>
-        <button type="button" className="min-h-11 cursor-pointer whitespace-nowrap px-1.5 text-[13px] font-semibold underline" onClick={() => setArtes(true)}>
+        <button type="button" className="min-h-11 cursor-pointer whitespace-nowrap px-1.5 text-[13px] font-semibold underline" onClick={onArtes}>
           Trocar arte
         </button>
       </div>
-      {artes && (
-        <EscolhaDeArte
-          oracleId={item.oracleId}
-          nome={item.name}
-          atualId={print.id}
-          onEscolher={(p) => escolherArte(item.oracleId, p)}
-          onClose={() => setArtes(false)}
-        />
-      )}
     </article>
   );
 }
@@ -374,7 +364,11 @@ function Resumo({ emPortugues, semPt, versos, tabela, linhas }: { emPortugues: n
 }
 
 export function Montador({ tabela }: { tabela: Tabela }) {
-  const { itens, pronto, quantidade, acessorios, tudoEmPortugues, limpar } = useCart();
+  const { itens, pronto, quantidade, acessorios, tudoEmPortugues, limpar, escolherArte } = useCart();
+  /** Carta com a janela de artes aberta; as setas da janela passam pelas cartas na ordem da tela. */
+  const [artesDe, setArtesDe] = useState<string | null>(null);
+  const posicaoArtes = artesDe ? itens.findIndex((i) => i.oracleId === artesDe) : -1;
+  const itemArtes = posicaoArtes >= 0 ? itens[posicaoArtes] : null;
   const linhas = linhasDe(acessorios, tabela.produtos);
   const { situacao, emPortugues } = useSituacoes(itens);
   const semPt = itens.filter((i) => situacao(i).modo === "indisponivel" && !situacao(i).carregando).length;
@@ -417,7 +411,7 @@ export function Montador({ tabela }: { tabela: Tabela }) {
           )}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(190px,1fr))] sm:gap-3.5">
             {itens.map((item) => (
-              <Tile key={item.oracleId} item={item} sit={situacao(item)} />
+              <Tile key={item.oracleId} item={item} sit={situacao(item)} onArtes={() => setArtesDe(item.oracleId)} />
             ))}
           </div>
         </section>
@@ -425,6 +419,16 @@ export function Montador({ tabela }: { tabela: Tabela }) {
         </div>
         <Resumo emPortugues={emPortugues} semPt={semPt} versos={versos} tabela={tabela} linhas={linhas} />
       </div>
+      {itemArtes && (
+        <EscolhaDeArte
+          oracleId={itemArtes.oracleId}
+          nome={itemArtes.name}
+          atualId={situacao(itemArtes).print.id}
+          onEscolher={(p) => escolherArte(itemArtes.oracleId, p)}
+          onClose={() => setArtesDe(null)}
+          navegacao={{ posicao: posicaoArtes, total: itens.length, irPara: (n) => setArtesDe(itens[n]?.oracleId ?? null) }}
+        />
+      )}
     </>
   );
 }

@@ -149,6 +149,15 @@ export function basicoDeArteInteira(meta: MetaDeImpressao): boolean {
 }
 
 /**
+ * Terreno básico com moldura comum (qualquer moldura): só o nome e a linha de
+ * tipo são trocados. A caixa de texto tem só o símbolo grande de mana impresso
+ * e fica exatamente como está.
+ */
+export function basicoComMoldura(meta: MetaDeImpressao): boolean {
+  return !meta.fullArt && /\bBasic\b.*\bLand\b/i.test(meta.tipo);
+}
+
+/**
  * Qual molde usar numa face: o manual, se existir; o automático, se a moldura
  * permitir; ou nenhum (a arte não recebe tradução).
  */
